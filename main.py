@@ -1,188 +1,106 @@
-import streamlit as st
-import base64
-from openai import OpenAI
+component_value = st.components.v1.html("""
+<div style="color:white; display:flex; flex-direction:column; gap:10px; height:100%;">
 
-st.set_page_config(layout="wide")
+<!-- Buttons -->
+<div>
+<button onclick="startCapture()">📺 Share Tab</button>
+<button onclick="startSpeech()">🎙 Start Transcript</button>
+<button onclick="takeShot()">📸 Screenshot</button>
+</div>
 
-# ── Session ──
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "screenshot" not in st.session_state:
-    st.session_state.screenshot = None
-if "api_key" not in st.session_state:
-    st.session_state.api_key = ""
+<!-- Video (FIXED HEIGHT) -->
+<div style="flex:0 0 auto;">
+<video id="video" autoplay 
+    style="
+    width:100%;
+    height:260px;   /* ✅ FIX: fixed height */
+    object-fit:contain;
+    border-radius:10px;
+    background:black;">
+</video>
+</div>
 
-st.title("🧠 MeetingMind AI")
+<!-- Transcript (ALWAYS VISIBLE) -->
+<div style="flex:1 1 auto; display:flex; flex-direction:column;">
+<h4 style="margin:4px 0;">🎙 Live Transcript</h4>
 
-st.session_state.api_key = st.text_input("OpenAI API Key", type="password")
+<div id="transcript" 
+    style="
+    background:#111;
+    padding:12px;
+    border-radius:8px;
+    min-height:80px;   /* ✅ Always 2–3 lines */
+    max-height:120px;  /* ✅ Prevent overflow */
+    font-size:14px;
+    line-height:1.6;
+    overflow-y:auto;
+    color:#e2e8f0;">
+</div>
+</div>
 
-left, right = st.columns([1.2, 1])
+</div>
 
-# ═══════════════════════════════════
-# LEFT PANEL
-# ═══════════════════════════════════
-with left:
-    component_value = st.components.v1.html("""
-    <div style="color:white">
+<script>
+let stream = null;
+let fullText = "";
 
-    <button onclick="startCapture()">📺 Share Tab</button>
-    <button onclick="startSpeech()">🎙 Start Transcript</button>
-    <button onclick="takeShot()">📸 Screenshot</button>
+function sendData(type, data){
+    window.parent.postMessage({
+        isStreamlitMessage: true,
+        type: "streamlit:setComponentValue",
+        value: {type:type, data:data}
+    }, "*");
+}
 
-    <br><br>
+async function startCapture(){
+    stream = await navigator.mediaDevices.getDisplayMedia({
+        video:true,
+        audio:true
+    });
+    document.getElementById("video").srcObject = stream;
+}
 
-    <video id="video" autoplay style="width:100%;border-radius:10px;"></video>
+function takeShot(){
+    const video = document.getElementById("video");
+    const canvas = document.createElement("canvas");
 
-    <h4>🎙 Live Transcript</h4>
-    <div id="transcript" 
-        style="
-        background:#111;
-        padding:12px;
-        border-radius:8px;
-        min-height:70px;   /* ✅ FIX: 2–3 lines */
-        font-size:14px;
-        line-height:1.6;
-        overflow-y:auto;
-        color:#e2e8f0;">
-    </div>
+    canvas.width = 800;
+    canvas.height = 450;
 
-    </div>
+    canvas.getContext("2d").drawImage(video,0,0,800,450);
 
-    <script>
-    let stream = null;
-    let fullText = "";
+    const data = canvas.toDataURL("image/jpeg",0.6);
+    sendData("screenshot", data);
+}
 
-    function sendData(type, data){
-        window.parent.postMessage({
-            isStreamlitMessage: true,
-            type: "streamlit:setComponentValue",
-            value: {type:type, data:data}
-        }, "*");
+function startSpeech(){
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if(!SR){
+        alert("Use Chrome browser");
+        return;
     }
 
-    async function startCapture(){
-        stream = await navigator.mediaDevices.getDisplayMedia({
-            video:true,
-            audio:true
-        });
-        document.getElementById("video").srcObject = stream;
-    }
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
 
-    function takeShot(){
-        const video = document.getElementById("video");
-        const canvas = document.createElement("canvas");
-
-        canvas.width = 800;
-        canvas.height = 450;
-
-        canvas.getContext("2d").drawImage(video,0,0,800,450);
-
-        const data = canvas.toDataURL("image/jpeg",0.6);
-        sendData("screenshot", data);
-    }
-
-    function startSpeech(){
-        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-        if(!SR){
-            alert("Use Chrome browser");
-            return;
-        }
-
-        const rec = new SR();
-        rec.continuous = true;
-        rec.interimResults = true;
-
-        rec.onresult = function(e){
-            let interim = "";
-            for(let i=e.resultIndex;i<e.results.length;i++){
-                let txt = e.results[i][0].transcript;
-                if(e.results[i].isFinal){
-                    fullText += " " + txt;
-                } else {
-                    interim += txt;
-                }
+    rec.onresult = function(e){
+        let interim = "";
+        for(let i=e.resultIndex;i<e.results.length;i++){
+            let txt = e.results[i][0].transcript;
+            if(e.results[i].isFinal){
+                fullText += " " + txt;
+            } else {
+                interim += txt;
             }
-
-            document.getElementById("transcript").innerText = fullText + " " + interim;
-            sendData("transcript", fullText);
         }
 
-        rec.start();
+        document.getElementById("transcript").innerText = fullText + " " + interim;
+        sendData("transcript", fullText);
     }
 
-    </script>
-    """, height=520)
-
-    # SAFE HANDLING
-    if component_value and isinstance(component_value, dict):
-
-        if component_value.get("type") == "screenshot":
-            st.session_state.screenshot = component_value["data"].split(",")[1]
-            st.success("📸 Screenshot captured")
-
-        if component_value.get("type") == "transcript":
-            st.session_state["auto_prompt"] = component_value["data"]
-
-# ═══════════════════════════════════
-# RIGHT PANEL (FIXED CHAT)
-# ═══════════════════════════════════
-with right:
-
-    # ✅ FIX: Proper chat UI (no HTML rendering issue)
-    for m in st.session_state.messages:
-        with st.chat_message(m["role"]):
-            st.markdown(m["text"])
-
-    user_input = st.chat_input("Ask about meeting...")
-
-    if "auto_prompt" in st.session_state:
-        user_input = st.session_state.pop("auto_prompt")
-
-    def ask_ai(api_key, history, text, img):
-        client = OpenAI(api_key=api_key)
-
-        content = []
-        if img:
-            content.append({
-                "type":"image_url",
-                "image_url":{"url":f"data:image/jpeg;base64,{img}"}
-            })
-
-        content.append({"type":"text","text":text})
-
-        messages = [{"role":"system","content":"You are meeting assistant"}]
-
-        for h in history:
-            messages.append({
-                "role":h["role"],
-                "content":[{"type":"text","text":h["text"]}]
-            })
-
-        messages.append({"role":"user","content":content})
-
-        res = client.chat.completions.create(
-            model="gpt-4o",
-            messages=messages
-        )
-
-        return res.choices[0].message.content
-
-    if user_input:
-        if not st.session_state.api_key:
-            st.error("Enter API key")
-        else:
-            st.session_state.messages.append({"role":"user","text":user_input})
-
-            with st.spinner("🤖 Thinking..."):
-                reply = ask_ai(
-                    st.session_state.api_key,
-                    st.session_state.messages[-5:],
-                    user_input,
-                    st.session_state.screenshot
-                )
-
-            st.session_state.messages.append({"role":"assistant","text":reply})
-            st.session_state.screenshot = None
-
-            st.rerun()
+    rec.start();
+}
+</script>
+""", height=520)
