@@ -35,7 +35,16 @@ with left:
     <video id="video" autoplay style="width:100%;border-radius:10px;"></video>
 
     <h4>🎙 Live Transcript</h4>
-    <div id="transcript" style="background:#111;padding:10px;border-radius:8px;height:120px;overflow:auto;"></div>
+    <div id="transcript" 
+        style="background:#111;
+               padding:12px;
+               border-radius:8px;
+               height:80px;
+               font-size:14px;
+               line-height:1.6;
+               overflow-y:auto;
+               color:#e2e8f0;">
+    </div>
 
     </div>
 
@@ -105,9 +114,9 @@ with left:
     }
 
     </script>
-    """, height=500)
+    """, height=520)
 
-    # ✅ SAFE HANDLING
+    # SAFE HANDLING
     if component_value and isinstance(component_value, dict):
 
         if component_value.get("type") == "screenshot":
@@ -118,11 +127,51 @@ with left:
             st.session_state["auto_prompt"] = component_value["data"]
 
 # ═══════════════════════════════════
-# RIGHT PANEL (AI CHAT)
+# RIGHT PANEL (AI CHAT FIXED UI)
 # ═══════════════════════════════════
 with right:
+
+    # 🔥 FIX: Scrollable chat container
+    chat_html = """
+    <div style="
+        height:400px;
+        overflow-y:auto;
+        padding:10px;
+        border:1px solid #ddd;
+        border-radius:10px;
+        background:#0e1117;
+        color:white;
+        display:flex;
+        flex-direction:column;
+        gap:10px;
+    " id="chat-box">
+    """
+
     for m in st.session_state.messages:
-        st.write(("🧑" if m["role"]=="user" else "🤖"), m["text"])
+        if m["role"] == "user":
+            chat_html += f"""
+            <div style="align-self:flex-end;background:#1e3a5f;padding:8px 12px;border-radius:10px;">
+            {m['text']}
+            </div>
+            """
+        else:
+            chat_html += f"""
+            <div style="align-self:flex-start;background:#222;padding:8px 12px;border-radius:10px;">
+            {m['text']}
+            </div>
+            """
+
+    chat_html += "</div>"
+
+    # Auto-scroll
+    chat_html += """
+    <script>
+    var box = document.getElementById('chat-box');
+    if(box){ box.scrollTop = box.scrollHeight; }
+    </script>
+    """
+
+    st.markdown(chat_html, unsafe_allow_html=True)
 
     user_input = st.chat_input("Ask about meeting...")
 
@@ -164,7 +213,7 @@ with right:
         else:
             st.session_state.messages.append({"role":"user","text":user_input})
 
-            with st.spinner("Thinking..."):
+            with st.spinner("🤖 Thinking..."):
                 reply = ask_ai(
                     st.session_state.api_key,
                     st.session_state.messages[-5:],
