@@ -1,17 +1,11 @@
 import streamlit as st
+import urllib.parse
 import os
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# AI PROVIDER CONFIG
-# To switch to Claude later — only change these 2 lines + requirements.txt:
-#   AI_MODEL     = "claude-opus-4-5"
-#   ENV_KEY_NAME = "ANTHROPIC_API_KEY"
-# Then swap the JS fetch block (see comments inside MAIN_APP).
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ── Provider config (swap these 2 lines when moving to Claude) ──────────────
 AI_MODEL     = "gpt-4o"
 ENV_KEY_NAME = "OPENAI_API_KEY"
 
-# ── Page config ───────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="MeetingMind AI",
     page_icon="🧠",
@@ -19,1023 +13,875 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ── Outer Streamlit CSS ───────────────────────────────────────────────────
+# ── Outer Streamlit CSS ──────────────────────────────────────────────────────
 st.markdown("""
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
-
-  html, body, [class*="css"] {
-    background: #0d0f14 !important;
-    color: #e2e8f0;
-    font-family: 'DM Sans', sans-serif;
-  }
-  /* Hide Streamlit chrome */
-  #MainMenu, footer, header           { visibility: hidden !important; }
-  [data-testid="manage-app-button"]   { display: none !important; }
-  [data-testid="stToolbar"]           { display: none !important; }
-  .viewerBadge_container__r5tak       { display: none !important; }
-  .stDeployButton                     { display: none !important; }
-  section[data-testid="stSidebar"]    { display: none !important; }
-
-  .block-container {
-    padding: 0.5rem 0.9rem 0 0.9rem !important;
-    max-width: 100% !important;
-  }
-  /* Kill iframe default styling so no black boxes appear */
-  iframe {
-    border: none !important;
-    background: transparent !important;
-    display: block !important;
-  }
-
-  /* ── Header ── */
+  html, body, [class*="css"] { background:#0d0f14!important; font-family:'DM Sans',sans-serif; color:#e2e8f0; }
+  #MainMenu, footer, header                  { visibility:hidden!important; }
+  [data-testid="manage-app-button"]          { display:none!important; }
+  [data-testid="stToolbar"]                  { display:none!important; }
+  .viewerBadge_container__r5tak             { display:none!important; }
+  .stDeployButton                            { display:none!important; }
+  section[data-testid="stSidebar"]           { display:none!important; }
+  .block-container { padding:0.5rem 0.9rem 0!important; max-width:100%!important; }
+  iframe { border:none!important; background:transparent!important; display:block!important; }
   .mm-hdr {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 7px 14px;
-    background: linear-gradient(135deg, #1a1d27, #12151e);
-    border: 1px solid #1e2435; border-radius: 10px;
-    margin-bottom: 6px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    display:flex; align-items:center; justify-content:space-between;
+    padding:7px 14px; background:linear-gradient(135deg,#1a1d27,#12151e);
+    border:1px solid #1e2435; border-radius:10px; margin-bottom:6px;
+    box-shadow:0 4px 20px rgba(0,0,0,.5);
   }
-  .mm-hdr h1 {
-    font-family: 'Space Mono', monospace;
-    font-size: 1.05rem; color: #7dd3fc; margin: 0;
-  }
-  .mm-badge {
-    background: #1e3a5f; color: #7dd3fc;
-    font-size: 0.62rem; padding: 2px 9px;
-    border-radius: 20px; font-family: 'Space Mono', monospace;
-    border: 1px solid #2563eb44;
-  }
-  .mm-prov { font-size: 0.65rem; color: #475569; font-family: 'Space Mono', monospace; }
-
-  /* ── Expander & inputs ── */
-  .stExpander {
-    background: #12151e !important;
-    border: 1px solid #1e2435 !important;
-    border-radius: 8px !important;
-    margin-bottom: 6px !important;
-  }
-  .stTextInput > div > div > input {
-    background: #1a1d27 !important; border: 1px solid #2a2f3e !important;
-    color: #e2e8f0 !important; border-radius: 7px !important;
-  }
-  .stButton > button {
-    background: #1e3a5f !important; color: #7dd3fc !important;
-    border: 1px solid #2563eb44 !important; border-radius: 7px !important;
-    font-family: 'Space Mono', monospace !important; font-size: 0.74rem !important;
-  }
-  .stButton > button:hover { background: #1d4ed8 !important; color: #fff !important; }
+  .mm-hdr h1 { font-family:'Space Mono',monospace; font-size:1.05rem; color:#7dd3fc; margin:0; }
+  .mm-badge  { background:#1e3a5f; color:#7dd3fc; font-size:.62rem; padding:2px 9px; border-radius:20px; font-family:'Space Mono',monospace; border:1px solid #2563eb44; }
+  .stExpander { background:#12151e!important; border:1px solid #1e2435!important; border-radius:8px!important; margin-bottom:6px!important; }
+  .stTextInput>div>div>input { background:#1a1d27!important; border:1px solid #2a2f3e!important; color:#e2e8f0!important; border-radius:7px!important; }
+  .stButton>button { background:#1e3a5f!important; color:#7dd3fc!important; border:1px solid #2563eb44!important; border-radius:7px!important; font-family:'Space Mono',monospace!important; font-size:.74rem!important; }
+  .stButton>button:hover { background:#1d4ed8!important; color:#fff!important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Session state ─────────────────────────────────────────────────────────
+# ── Session state ────────────────────────────────────────────────────────────
 if "api_key" not in st.session_state:
     st.session_state.api_key = os.environ.get(ENV_KEY_NAME, "")
 
-# ── Header ────────────────────────────────────────────────────────────────
+# ── Header ───────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="mm-hdr">
   <h1>🧠 MeetingMind AI</h1>
   <div style="display:flex;gap:10px;align-items:center;">
-    <span class="mm-prov">Powered by GPT-4o Vision</span>
-    <span class="mm-badge">BETA v3.0</span>
+    <span style="font-size:.65rem;color:#475569;font-family:'Space Mono',monospace;">GPT-4o Vision</span>
+    <span class="mm-badge">v3.1</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
-# ── API Key ───────────────────────────────────────────────────────────────
+# ── API Key expander ─────────────────────────────────────────────────────────
 with st.expander("⚙️ OpenAI API Key", expanded=not st.session_state.api_key):
     c1, c2 = st.columns([5, 1])
     with c1:
-        key_val = st.text_input(
-            "key", value=st.session_state.api_key,
-            type="password", placeholder="sk-...",
-            label_visibility="collapsed"
-        )
+        key_val = st.text_input("key", value=st.session_state.api_key,
+                                type="password", placeholder="sk-...",
+                                label_visibility="collapsed")
     with c2:
         if st.button("Save"):
             st.session_state.api_key = key_val
             st.rerun()
-    st.caption("🔑 Stored in session memory only — sent directly to OpenAI, never to any other server.")
+    st.caption("🔑 Session only — sent directly to OpenAI, never stored elsewhere.")
 
-# ── Gate: require key ─────────────────────────────────────────────────────
 api_key = st.session_state.api_key
 if not api_key:
-    st.info("👆 Enter your OpenAI API key above to launch the app.", icon="🔑")
+    st.info("👆 Enter your OpenAI API key above to start.", icon="🔑")
     st.stop()
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# MAIN APP — single HTML/JS component
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  CAPTURE POPUP HTML
 #
-# FIX #1 — Buttons (Share Tab / Send) not working:
-#   • getDisplayMedia() is BLOCKED inside iframes unless the iframe has
-#     allow="display-capture" — which Streamlit does NOT set.
-#   • Fix: on startup, we inject a tiny bridge script into window.PARENT
-#     (allowed because Streamlit iframes are same-origin).
-#     The bridge function lives in the top-level page context and calls
-#     navigator.mediaDevices.getDisplayMedia() there — which works.
-#     The returned MediaStream is passed back and used directly in the
-#     iframe's <video> element (cross-frame stream works in same-origin).
-#   • Send button: OpenAI fetch goes directly from JS → api.openai.com
-#     (CORS is allowed by OpenAI for browser clients). No Python round-trip.
+#  Why a popup?  Streamlit renders st.components.v1.html() via srcdoc="..."
+#  Chrome gives srcdoc iframes an OPAQUE (null) origin — this blocks
+#  getDisplayMedia() no matter what we do inside the iframe.
 #
-# FIX #2 — Send button under "Manage App" badge:
-#   • Streamlit's badge is hidden via CSS in the outer wrapper above.
-#   • The send button is 2× larger (padding + font size doubled).
-#   • Component height is tuned so the input bar is not cut off.
+#  window.open() is allowed by Streamlit's sandbox:
+#    sandbox="... allow-popups allow-popups-to-escape-sandbox ..."
+#  The "escape-sandbox" flag means the popup is a REAL top-level window —
+#  no sandbox at all — so getDisplayMedia() works perfectly there.
 #
-# FIX #3 — Transcript panel too small (1 line):
-#   • #tbox now has min-height: 68px which comfortably shows 3 lines of text.
-#   • Added a dedicated "TRANSCRIPT" sub-panel header with its own border.
-#
-# FIX (bonus) — No extra black boxes:
-#   • Only ONE st.components.v1.html() call = only ONE iframe = no gaps.
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  The popup sends screenshots back via postMessage(). Our main app
+#  listens and stores them for the next chat message.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+POPUP_HTML = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>MeetingMind — Capture</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#06080f;color:#e2e8f0;font-family:'Segoe UI',sans-serif;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+  #bar{display:flex;gap:8px;align-items:center;padding:10px 14px;background:#0f1117;border-bottom:1px solid #1e2435;flex-shrink:0}
+  #bar h2{font-size:.88rem;color:#7dd3fc;font-family:monospace;margin-right:auto}
+  #status{font-size:.7rem;color:#475569;font-family:monospace}
+  #vwrap{flex:1;background:#000;position:relative;overflow:hidden;min-height:0}
+  #vid{width:100%;height:100%;object-fit:contain}
+  #ph{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#1e3a5f}
+  #ph .pi{font-size:3rem;opacity:.3}
+  #ph p{font-size:.78rem;font-family:monospace;text-align:center;max-width:220px;line-height:1.7}
+  #shot-prev{display:none;padding:6px 14px;background:#0a0c12;border-top:1px solid #1e2435;flex-shrink:0}
+  #shot-prev img{width:100%;max-height:80px;object-fit:cover;border-radius:5px;border:1px solid #164e63}
+  .p-lbl{font-size:.6rem;color:#22d3ee;font-family:monospace;margin-bottom:3px;letter-spacing:.8px}
+  .ok{color:#4ade80}
+  btn,button{padding:7px 13px;border-radius:7px;border:1px solid transparent;cursor:pointer;font-size:.72rem;font-family:monospace;transition:all .15s;white-space:nowrap}
+  .b1{background:#1e3a5f;color:#7dd3fc;border-color:#2563eb44}
+  .b1:hover{background:#1d4ed8;color:#fff}
+  .b1:disabled{background:#141720;color:#334155;cursor:not-allowed}
+  .b2{background:#14532d;color:#4ade80;border-color:#16a34a44;cursor:default}
+  .b3{background:#1e1b4b;color:#a5b4fc;border-color:#6366f144}
+  .b3:hover{background:#312e81;color:#c7d2fe}
+  .b3:disabled{background:#141720;color:#334155;cursor:not-allowed}
+  .b4{background:#7c3aed;color:#fff;border-color:#8b5cf6;font-weight:700;padding:8px 18px;font-size:.78rem}
+  .b4:hover{background:#6d28d9}
+  .b4:disabled{background:#1e2435;color:#475569;cursor:not-allowed}
+</style>
+</head>
+<body>
+<div id="bar">
+  <h2>📺 MeetingMind — Tab Capture</h2>
+  <span id="status">Ready</span>
+  <button class="b1" id="bShare">📺 Share Tab</button>
+  <button class="b1" id="bStop" disabled>⏹ Stop</button>
+  <button class="b4" id="bShot" disabled>📸 Send Screenshot to App</button>
+</div>
+<div id="vwrap">
+  <video id="vid" autoplay muted playsinline></video>
+  <canvas id="cv" style="display:none"></canvas>
+  <div id="ph">
+    <div class="pi">📺</div>
+    <p>Click <strong style="color:#3b82f6">Share Tab</strong> then select your meeting tab from the browser picker.</p>
+  </div>
+</div>
+<div id="shot-prev">
+  <div class="p-lbl">LAST SCREENSHOT SENT</div>
+  <img id="shot-img" src="" alt=""/>
+</div>
+<script>
+var ms = null;
 
+document.getElementById('bShare').addEventListener('click', async function() {
+  try {
+    document.getElementById('status').textContent = 'Requesting…';
+    ms = await navigator.mediaDevices.getDisplayMedia({video:{frameRate:15}, audio:true});
+    var vid = document.getElementById('vid');
+    vid.srcObject = ms;
+    vid.style.display = 'block';
+    document.getElementById('ph').style.display = 'none';
+    document.getElementById('bShare').disabled = true;
+    document.getElementById('bShare').className = 'b2';
+    document.getElementById('bShare').textContent = '✅ Sharing';
+    document.getElementById('bStop').disabled = false;
+    document.getElementById('bShot').disabled = false;
+    document.getElementById('status').textContent = '● LIVE';
+    document.getElementById('status').style.color = '#4ade80';
+    ms.getTracks().forEach(function(t){ t.addEventListener('ended', stopShare); });
+  } catch(e) {
+    document.getElementById('status').textContent = '✖ ' + e.message;
+    document.getElementById('status').style.color = '#f87171';
+  }
+});
+
+document.getElementById('bStop').addEventListener('click', stopShare);
+
+function stopShare() {
+  if (ms) { ms.getTracks().forEach(function(t){t.stop();}); ms = null; }
+  var vid = document.getElementById('vid');
+  vid.srcObject = null;
+  document.getElementById('ph').style.display = 'flex';
+  document.getElementById('bShare').disabled = false;
+  document.getElementById('bShare').className = 'b1';
+  document.getElementById('bShare').textContent = '📺 Share Tab';
+  document.getElementById('bStop').disabled = true;
+  document.getElementById('bShot').disabled = true;
+  document.getElementById('status').textContent = 'Stopped';
+  document.getElementById('status').style.color = '';
+}
+
+document.getElementById('bShot').addEventListener('click', function() {
+  var vid = document.getElementById('vid');
+  if (!vid.srcObject || vid.videoWidth === 0) {
+    document.getElementById('status').textContent = 'No video yet';
+    return;
+  }
+  var cv = document.getElementById('cv');
+  cv.width = vid.videoWidth; cv.height = vid.videoHeight;
+  cv.getContext('2d').drawImage(vid, 0, 0, cv.width, cv.height);
+  var dataUrl = cv.toDataURL('image/jpeg', 0.85);
+  var b64 = dataUrl.split(',')[1];
+
+  // Send to parent app window
+  if (window.opener) {
+    window.opener.postMessage({type:'mm-screenshot', data:b64}, '*');
+    document.getElementById('status').textContent = '✅ Sent to app!';
+    document.getElementById('status').style.color = '#4ade80';
+    document.getElementById('shot-img').src = dataUrl;
+    document.getElementById('shot-prev').style.display = 'block';
+  } else {
+    document.getElementById('status').textContent = '⚠ No parent window found';
+  }
+});
+</script>
+</body>
+</html>"""
+
+# URL-encode the popup HTML so it can be safely embedded in a JS string literal
+# (no escaping issues with backticks, quotes, backslashes, dollar signs)
+POPUP_HTML_ENCODED = urllib.parse.quote(POPUP_HTML)
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  MAIN APP HTML
+#
+#  Send button / AI chat:
+#    Direct fetch from JS → api.openai.com works because:
+#    • OpenAI sets Access-Control-Allow-Origin: * (CORS open)
+#    • null-origin srcdoc iframes are allowed by CORS * responses
+#    • All errors are shown in the chat UI, never hidden
+#
+#  All buttons use addEventListener (NOT onclick=) bound in DOMContentLoaded.
+#  No IIFEs that could crash before the DOM is set up.
+#  Every catch() block writes a visible red error into the chat.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 MAIN_APP = f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
 <style>
-  /* ── Reset ─────────────────────────────────────────── */
-  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  html, body {{ height: 100%; overflow: hidden; background: transparent; }}
-  body {{ font-family: 'DM Sans', 'Segoe UI', sans-serif; color: #e2e8f0; }}
+  *, *::before, *::after {{ box-sizing:border-box; margin:0; padding:0; }}
+  html, body {{ height:100%; overflow:hidden; background:transparent; font-family:'DM Sans','Segoe UI',sans-serif; color:#e2e8f0; }}
 
-  /* ── Root two-panel layout ─────────────────────────── */
+  /* ── Root layout ──────────────────────────────── */
   #app {{
-    display: flex;
-    width: 100%;
-    height: 100%;
-    background: #0d0f14;
-    border: 1px solid #1e2435;
-    border-radius: 10px;
-    overflow: hidden;
-    box-shadow: 0 6px 32px rgba(0,0,0,0.6);
+    display:flex; width:100%; height:100%;
+    background:#0d0f14; border:1px solid #1e2435;
+    border-radius:10px; overflow:hidden;
+    box-shadow:0 6px 32px rgba(0,0,0,.6);
   }}
 
-  /* ── Left panel ────────────────────────────────────── */
+  /* ── Left panel ───────────────────────────────── */
   #LP {{
-    width: 56%;
-    min-width: 240px;
-    max-width: 75%;
-    display: flex;
-    flex-direction: column;
-    background: #0c0e15;
-    border-right: 1px solid #1e2435;
-    overflow: hidden;
-    flex-shrink: 0;
+    width:52%; min-width:230px; max-width:74%;
+    display:flex; flex-direction:column;
+    background:#0c0e15; border-right:1px solid #1e2435;
+    overflow:hidden; flex-shrink:0;
   }}
 
-  /* ── Drag handle ────────────────────────────────────── */
+  /* ── Drag handle ──────────────────────────────── */
   #RZ {{
-    width: 6px;
-    flex-shrink: 0;
-    background: #12151e;
-    cursor: col-resize;
-    position: relative;
-    z-index: 20;
-    transition: background 0.2s;
+    width:6px; flex-shrink:0;
+    background:#0d0f14; cursor:col-resize;
+    position:relative; z-index:20; transition:background .2s;
   }}
-  #RZ:hover, #RZ.active {{ background: #1d4ed855; }}
+  #RZ:hover, #RZ.on {{ background:#1d4ed833; }}
   #RZ::after {{
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 2px;
-    height: 40px;
-    background: #1e2435;
-    border-radius: 2px;
-    transition: background 0.2s;
+    content:''; position:absolute; top:50%; left:50%;
+    transform:translate(-50%,-50%);
+    width:2px; height:36px; background:#1e2435; border-radius:2px; transition:background .2s;
   }}
-  #RZ:hover::after, #RZ.active::after {{ background: #3b82f6; }}
+  #RZ:hover::after, #RZ.on::after {{ background:#3b82f6; }}
 
-  /* ── Right panel ────────────────────────────────────── */
+  /* ── Right panel ──────────────────────────────── */
   #RP {{
-    flex: 1;
-    min-width: 240px;
-    display: flex;
-    flex-direction: column;
-    background: #0c0e15;
-    overflow: hidden;
+    flex:1; min-width:230px;
+    display:flex; flex-direction:column;
+    background:#0c0e15; overflow:hidden;
   }}
 
-  /* ── Panel header bar ───────────────────────────────── */
+  /* ── Panel header ─────────────────────────────── */
   .ph {{
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 9px 13px;
-    background: #12151e;
-    border-bottom: 1px solid #1e2435;
-    flex-shrink: 0;
-    font-size: 0.66rem;
-    font-weight: 700;
-    letter-spacing: 1.2px;
-    text-transform: uppercase;
-    color: #475569;
-    font-family: 'Space Mono', monospace;
+    display:flex; align-items:center; gap:7px;
+    padding:9px 13px; background:#101318;
+    border-bottom:1px solid #1a1f2e; flex-shrink:0;
+    font-size:.64rem; font-weight:700; letter-spacing:1.2px;
+    text-transform:uppercase; color:#3d4f6e;
+    font-family:'Space Mono',monospace;
   }}
-  .dot {{
-    width: 7px; height: 7px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    animation: pulse 2.5s ease-in-out infinite;
-  }}
-  @keyframes pulse {{ 0%,100%{{opacity:1}} 50%{{opacity:0.2}} }}
+  .dot {{ width:7px; height:7px; border-radius:50%; flex-shrink:0; animation:blink 2.5s ease-in-out infinite; }}
+  @keyframes blink {{ 0%,100%{{opacity:1}} 50%{{opacity:.15}} }}
 
-  /* ── Status chip ────────────────────────────────────── */
+  /* ── Status chip ──────────────────────────────── */
   #chip {{
-    margin-left: auto;
-    font-size: 0.6rem;
-    padding: 2px 9px;
-    border-radius: 10px;
-    font-family: 'Space Mono', monospace;
-    transition: all 0.3s;
-    background: #1c1917;
-    color: #78716c;
-    border: 1px solid #44403c55;
+    margin-left:auto; font-size:.59rem; padding:2px 9px;
+    border-radius:10px; font-family:'Space Mono',monospace;
+    transition:all .3s; background:#161a24; color:#3d4f6e; border:1px solid #1e2435;
   }}
 
-  /* ── Control buttons row ────────────────────────────── */
+  /* ── Controls ─────────────────────────────────── */
   #ctrl {{
-    display: flex;
-    gap: 5px;
-    flex-wrap: wrap;
-    align-items: center;
-    padding: 7px 10px;
-    background: #0d0f14;
-    border-bottom: 1px solid #1e2435;
-    flex-shrink: 0;
+    display:flex; gap:5px; flex-wrap:wrap; align-items:center;
+    padding:8px 10px; background:#09090f; border-bottom:1px solid #1a1f2e; flex-shrink:0;
   }}
 
-  /* ── Video area (fills remaining left space) ────────── */
-  #vw {{
-    flex: 1;
-    min-height: 0;
-    background: #06080f;
-    position: relative;
-    overflow: hidden;
+  /* ── Screenshot preview (left panel) ─────────── */
+  #shot-area {{
+    flex-shrink:0; background:#09090f;
+    border-bottom:1px solid #1a1f2e;
+    display:none;
   }}
-  #vid {{
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    display: none;
-    background: #000;
+  #shot-area .sa-lbl {{
+    font-size:.58rem; color:#22d3ee; font-family:'Space Mono',monospace;
+    padding:5px 10px 3px; letter-spacing:.8px;
   }}
-  #vph {{
-    position: absolute;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    pointer-events: none;
-  }}
-  #vph .vico {{ font-size: 2.8rem; opacity: 0.12; }}
-  #vph .vhint {{
-    font-size: 0.7rem;
-    color: #1d2d44;
-    text-align: center;
-    max-width: 200px;
-    line-height: 1.8;
-    font-family: 'Space Mono', monospace;
-  }}
+  #shot-area img {{ width:100%; max-height:90px; object-fit:cover; display:block; }}
 
-  /* ── Screenshot preview strip ───────────────────────── */
-  #sstrip {{
-    display: none;
-    padding: 6px 10px;
-    border-top: 1px solid #1e2435;
-    background: #0a0c12;
-    flex-shrink: 0;
-  }}
-  .slbl {{
-    font-size: 0.58rem;
-    color: #22d3ee;
-    font-family: 'Space Mono', monospace;
-    margin-bottom: 4px;
-    letter-spacing: 0.8px;
-  }}
-  #simg {{
-    width: 100%;
-    max-height: 72px;
-    object-fit: cover;
-    border-radius: 5px;
-    border: 1px solid #164e63;
-  }}
-
-  /* ── Transcript panel (FIX #3 — 3-line min height) ── */
+  /* ── Transcript (3-line panel) ────────────────── */
   #txpanel {{
-    flex-shrink: 0;
-    background: #0a0c12;
-    border-top: 1px solid #1e2435;
+    flex-shrink:0; background:#09090f; border-bottom:1px solid #1a1f2e;
   }}
-  .txhdr {{
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 10px;
-    border-bottom: 1px solid #1e2435;
-    background: #0f1117;
+  .tx-hdr {{
+    display:flex; align-items:center; gap:6px;
+    padding:5px 10px; background:#101318; border-bottom:1px solid #1a1f2e;
   }}
-  .txlbl {{
-    font-size: 0.58rem;
-    color: #334155;
-    font-family: 'Space Mono', monospace;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-  }}
-  .txbtns {{
-    display: flex;
-    gap: 4px;
-    margin-left: auto;
-  }}
+  .tx-lbl {{ font-size:.58rem; color:#2d3d55; font-family:'Space Mono',monospace; letter-spacing:1px; }}
+  .tx-btns {{ display:flex; gap:4px; margin-left:auto; }}
   #tbox {{
-    padding: 7px 10px;
-    font-size: 0.74rem;
-    color: #64748b;
-    min-height: 68px;       /* ← exactly 3 lines of text */
-    max-height: 90px;
-    overflow-y: auto;
-    font-style: italic;
-    line-height: 1.55;
-    scrollbar-width: thin;
-    scrollbar-color: #1e2435 transparent;
-    word-break: break-word;
+    padding:7px 10px;
+    font-size:.75rem; color:#475569; font-style:italic; line-height:1.6;
+    min-height:72px;   /* ← exactly 3 lines */
+    max-height:92px; overflow-y:auto;
+    scrollbar-width:thin; scrollbar-color:#1a1f2e transparent;
+    word-break:break-word;
   }}
-  #tbox.active {{ color: #94a3b8; font-style: normal; }}
+  #tbox.live {{ color:#94a3b8; font-style:normal; }}
 
-  /* ── RIGHT: Chat messages area (scrollable, fixed) ──── */
-  /* KEY: flex:1 + min-height:0 = grows to fill but NEVER overflows panel */
+  /* ── Spacer (left bottom filler) ─────────────── */
+  #lspacer {{ flex:1; background:#06080f; min-height:0; }}
+
+  /* ── RIGHT: chat messages ─────────────────────── */
+  /* flex:1 + min-height:0 → scrolls internally, NEVER overflows */
   #msgs {{
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 9px;
-    scrollbar-width: thin;
-    scrollbar-color: #1e2435 transparent;
+    flex:1; min-height:0; overflow-y:auto; padding:12px;
+    display:flex; flex-direction:column; gap:9px;
+    scrollbar-width:thin; scrollbar-color:#1a1f2e transparent;
   }}
   .mu {{
-    align-self: flex-end;
-    background: #1e3a5f;
-    border: 1px solid #2563eb33;
-    color: #e2e8f0;
-    padding: 9px 13px;
-    border-radius: 14px 14px 3px 14px;
-    max-width: 83%;
-    font-size: 0.8rem;
-    line-height: 1.5;
-    word-break: break-word;
+    align-self:flex-end; background:#1a3254; border:1px solid #2563eb2a;
+    color:#e2e8f0; padding:9px 13px;
+    border-radius:14px 14px 3px 14px;
+    max-width:84%; font-size:.79rem; line-height:1.52; word-break:break-word;
   }}
   .ma {{
-    align-self: flex-start;
-    background: #151823;
-    border: 1px solid #252b3b;
-    color: #cbd5e1;
-    padding: 9px 13px;
-    border-radius: 14px 14px 14px 3px;
-    max-width: 88%;
-    font-size: 0.8rem;
-    line-height: 1.62;
-    word-break: break-word;
+    align-self:flex-start; background:#131620; border:1px solid #222840;
+    color:#c4cedf; padding:9px 13px;
+    border-radius:14px 14px 14px 3px;
+    max-width:88%; font-size:.79rem; line-height:1.62; word-break:break-word;
   }}
-  .mm {{ font-size: 0.6rem; color: #334155; margin-top: 5px; }}
+  .merr {{
+    align-self:flex-start; background:#2d0a0a; border:1px solid #dc262644;
+    color:#f87171; padding:8px 12px; border-radius:10px;
+    max-width:88%; font-size:.76rem; line-height:1.5;
+    font-family:'Space Mono',monospace;
+  }}
+  .mm {{ font-size:.59rem; color:#2d3d55; margin-top:5px; }}
   .sbadge {{
-    display: inline-block;
-    background: #164e63; color: #67e8f9;
-    font-size: 0.58rem; padding: 1px 7px;
-    border-radius: 4px; margin-bottom: 5px;
-    font-family: 'Space Mono', monospace;
-    letter-spacing: 0.5px;
+    display:inline-block; background:#0e2e3b; color:#67e8f9;
+    font-size:.57rem; padding:1px 7px; border-radius:4px;
+    margin-bottom:5px; font-family:'Space Mono',monospace; letter-spacing:.5px;
   }}
-
-  /* Typing dots */
-  .tw {{ display: flex; gap: 5px; align-items: center; padding: 2px 0; }}
-  .td {{
-    width: 6px; height: 6px; border-radius: 50%; background: #334155;
-    animation: tda 1.4s ease-in-out infinite;
-  }}
-  .td:nth-child(2) {{ animation-delay: .18s; }}
-  .td:nth-child(3) {{ animation-delay: .36s; }}
-  @keyframes tda {{ 0%,100%{{opacity:.2;transform:translateY(0)}} 50%{{opacity:1;transform:translateY(-4px)}} }}
-
-  /* Empty state */
+  .tw {{ display:flex; gap:5px; align-items:center; }}
+  .td {{ width:6px; height:6px; border-radius:50%; background:#2d3d55; animation:tda 1.4s ease-in-out infinite; }}
+  .td:nth-child(2){{animation-delay:.18s}} .td:nth-child(3){{animation-delay:.36s}}
+  @keyframes tda {{ 0%,100%{{opacity:.15;transform:translateY(0)}} 50%{{opacity:1;transform:translateY(-4px)}} }}
   .emp {{
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    height: 100%; gap: 10px;
+    display:flex; flex-direction:column; align-items:center;
+    justify-content:center; height:100%; gap:10px;
   }}
-  .ei {{ font-size: 2rem; opacity: 0.1; }}
-  .ep {{
-    font-size: 0.74rem; color: #1e2a3a;
-    text-align: center; max-width: 185px;
-    line-height: 1.7;
-  }}
+  .ei {{ font-size:2rem; opacity:.08; }}
+  .ep {{ font-size:.72rem; color:#1a2535; text-align:center; max-width:180px; line-height:1.75; }}
 
-  /* ── Quick actions ──────────────────────────────────── */
+  /* ── Quick actions ────────────────────────────── */
   #qbar {{
-    display: flex;
-    gap: 5px;
-    flex-wrap: wrap;
-    padding: 6px 10px;
-    border-top: 1px solid #1e2435;
-    background: #0a0c12;
-    flex-shrink: 0;
+    display:flex; gap:5px; flex-wrap:wrap;
+    padding:6px 10px; border-top:1px solid #1a1f2e;
+    background:#09090f; flex-shrink:0;
   }}
 
-  /* ── Input bar (FIX #2 — send button 2× bigger) ────── */
+  /* ── Input bar ────────────────────────────────── */
   #ibar {{
-    display: flex;
-    gap: 7px;
-    align-items: flex-end;
-    padding: 8px 10px;
-    border-top: 1px solid #1e2435;
-    background: #0a0c12;
-    flex-shrink: 0;
+    display:flex; gap:7px; align-items:flex-end;
+    padding:9px 10px; border-top:1px solid #1a1f2e;
+    background:#09090f; flex-shrink:0;
   }}
   #inp {{
-    flex: 1;
-    background: #12151e;
-    border: 1px solid #252b3b;
-    color: #e2e8f0;
-    border-radius: 8px;
-    padding: 9px 12px;
-    font-size: 0.82rem;
-    font-family: 'DM Sans', 'Segoe UI', sans-serif;
-    resize: none;
-    min-height: 40px;
-    max-height: 100px;
-    outline: none;
-    line-height: 1.5;
-    transition: border-color 0.2s;
+    flex:1; background:#101318; border:1px solid #1e2a3a;
+    color:#e2e8f0; border-radius:8px; padding:9px 12px;
+    font-size:.81rem; font-family:'DM Sans','Segoe UI',sans-serif;
+    resize:none; min-height:40px; max-height:100px; outline:none;
+    line-height:1.5; transition:border-color .2s;
   }}
-  #inp:focus {{ border-color: #2563eb66; }}
-  #inp::placeholder {{ color: #1e2a3a; }}
+  #inp:focus {{ border-color:#2563eb55; }}
+  #inp::placeholder {{ color:#1e2a3a; }}
 
-  /* ── Buttons ─────────────────────────────────────────── */
+  /* ── Buttons ──────────────────────────────────── */
   .btn {{
-    padding: 7px 12px;
-    border-radius: 7px;
-    border: 1px solid transparent;
-    cursor: pointer;
-    font-size: 0.66rem;
-    font-family: 'Space Mono', monospace;
-    transition: all 0.15s;
-    white-space: nowrap;
-    line-height: 1;
-    outline: none;
+    padding:7px 11px; border-radius:7px; border:1px solid transparent;
+    cursor:pointer; font-size:.65rem; font-family:'Space Mono',monospace;
+    transition:all .15s; white-space:nowrap; line-height:1; outline:none;
   }}
-  .bb  {{ background:#1e3a5f; color:#7dd3fc; border-color:#2563eb44; }}
-  .bb:hover  {{ background:#1d4ed8; color:#fff; border-color:#3b82f6; }}
-  .bg  {{ background:#141720; color:#475569; border-color:#1e2435; }}
-  .bg:hover  {{ background:#1a1d27; color:#94a3b8; }}
-  .bg:disabled {{ opacity:.35; cursor:not-allowed; }}
-  .bgr {{ background:#14532d; color:#4ade80; border-color:#16a34a44; cursor:default; }}
-  .bp  {{ background:#1e1b4b; color:#a5b4fc; border-color:#6366f144; }}
-  .bp:hover  {{ background:#312e81; color:#c7d2fe; }}
+  .bb {{ background:#1a3254; color:#7dd3fc; border-color:#2563eb33; }}
+  .bb:hover {{ background:#1d4ed8; color:#fff; border-color:#3b82f6; }}
+  .bg {{ background:#0f1117; color:#3d4f6e; border-color:#1a1f2e; }}
+  .bg:hover {{ background:#141720; color:#64748b; }}
+  .bg:disabled {{ opacity:.3; cursor:not-allowed; }}
+  .bgr {{ background:#0d2a1a; color:#4ade80; border-color:#16a34a33; cursor:default; }}
+  .bp {{ background:#1a1740; color:#a5b4fc; border-color:#6366f133; }}
+  .bp:hover {{ background:#2d2a6e; color:#c7d2fe; }}
+  .bred {{ background:#2d0a0a; color:#f87171; border-color:#dc262633; }}
 
-  /* ── Send button — 2× size (FIX #2) ─────────────────── */
+  /* Send button — 2× size */
   #bsnd {{
-    background: #1d4ed8;
-    color: #fff;
-    border: 1px solid #3b82f6;
-    border-radius: 9px;
-    padding: 0 26px;         /* wider */
-    height: 52px;            /* taller — 2× of original ~26px */
-    font-size: 0.84rem;      /* bigger text */
-    font-family: 'Space Mono', monospace;
-    font-weight: 700;
-    cursor: pointer;
-    white-space: nowrap;
-    flex-shrink: 0;
-    transition: all 0.15s;
-    letter-spacing: 0.5px;
-    outline: none;
+    background:#1d4ed8; color:#fff; border:1px solid #3b82f6;
+    border-radius:9px; padding:0 28px; height:52px;
+    font-size:.84rem; font-family:'Space Mono',monospace; font-weight:700;
+    cursor:pointer; flex-shrink:0; transition:all .15s; outline:none; letter-spacing:.4px;
   }}
-  #bsnd:hover  {{ background: #2563eb; box-shadow: 0 0 12px #3b82f644; }}
-  #bsnd:disabled {{ background: #1e2435; color: #334155; border-color: #1e2435; cursor: not-allowed; box-shadow: none; }}
+  #bsnd:hover {{ background:#2563eb; box-shadow:0 0 14px #3b82f633; }}
+  #bsnd:disabled {{ background:#101318; color:#2d3d55; border-color:#1a1f2e; cursor:not-allowed; box-shadow:none; }}
 
-  /* ── Toast notification ─────────────────────────────── */
+  /* ── Toast ────────────────────────────────────── */
   .tst {{
-    position: fixed; bottom: 14px; right: 14px;
-    padding: 8px 14px; border-radius: 8px;
-    font-size: 0.68rem; font-family: 'Space Mono', monospace;
-    z-index: 9999; pointer-events: none;
-    animation: tfade 0.25s ease;
-    transition: opacity 0.4s;
-    max-width: 280px; line-height: 1.4;
+    position:fixed; bottom:12px; right:12px;
+    padding:8px 13px; border-radius:8px; font-size:.66rem;
+    font-family:'Space Mono',monospace; z-index:9999;
+    pointer-events:none; animation:tfade .25s ease; transition:opacity .4s;
+    max-width:270px; line-height:1.4;
   }}
-  @keyframes tfade {{ from{{opacity:0;transform:translateY(6px)}} to{{opacity:1;transform:none}} }}
+  @keyframes tfade {{ from{{opacity:0;transform:translateY(5px)}} to{{opacity:1;transform:none}} }}
 </style>
 </head>
 <body>
 <div id="app">
 
-  <!-- ═══════════════ LEFT PANEL ═══════════════ -->
+  <!-- ══════════ LEFT PANEL ══════════ -->
   <div id="LP">
-
-    <!-- Panel header -->
     <div class="ph">
-      <div class="dot" style="background:#3b82f6;box-shadow:0 0 6px #3b82f699;"></div>
+      <div class="dot" style="background:#3b82f6;box-shadow:0 0 5px #3b82f680;"></div>
       Meeting View
-      <span id="chip">● IDLE</span>
+      <span id="chip">⬤ IDLE</span>
     </div>
 
-    <!-- Controls -->
     <div id="ctrl">
-      <button class="btn bb" id="bsh"  onclick="startCap()">📺 Share Tab</button>
-      <button class="btn bg" id="bst"  onclick="stopCap()"  disabled>⏹ Stop</button>
-      <button class="btn bb" id="bsc"  onclick="takeShot()" disabled>📸 Screenshot</button>
-      <button class="btn bp" id="bmic" onclick="toggleMic()">🎙 Listen</button>
+      <button class="btn bb" id="bOpen">📺 Open Capture Window</button>
+      <button class="btn bg" id="bMic">🎙 Listen</button>
+      <button class="btn bg" id="bTxUse" style="margin-left:auto;">↗ Ask AI</button>
     </div>
 
-    <!-- Video display -->
-    <div id="vw">
-      <video id="vid" autoplay muted playsinline></video>
-      <canvas id="cv" style="display:none;"></canvas>
-      <div id="vph">
-        <div class="vico">📺</div>
-        <div class="vhint">
-          Click <strong style="color:#1d4ed8;">Share Tab</strong><br>
-          then pick your meeting tab<br>from the browser picker.<br><br>
-          <span style="color:#0f1729;">Best results on Chrome.</span>
-        </div>
-      </div>
+    <!-- Screenshot preview from popup -->
+    <div id="shot-area">
+      <div class="sa-lbl">📸 SCREENSHOT — WILL ATTACH TO NEXT MESSAGE</div>
+      <img id="shot-img" src="" alt="screenshot"/>
     </div>
 
-    <!-- Screenshot preview -->
-    <div id="sstrip">
-      <div class="slbl">📸 SCREENSHOT — WILL ATTACH TO NEXT MESSAGE</div>
-      <img id="simg" src="" alt="screenshot preview"/>
-    </div>
-
-    <!-- Transcript panel (FIX #3 — dedicated panel, 3-line min height) -->
+    <!-- Transcript panel — 3-line min height -->
     <div id="txpanel">
-      <div class="txhdr">
-        <span class="txlbl">🎙 Live Transcript</span>
-        <div class="txbtns">
-          <button class="btn bg" onclick="useTx()"   style="padding:2px 8px;font-size:0.58rem;">↗ Ask AI</button>
-          <button class="btn bg" onclick="clearTx()" style="padding:2px 8px;font-size:0.58rem;">✕</button>
+      <div class="tx-hdr">
+        <span class="tx-lbl">🎙 Live Transcript</span>
+        <div class="tx-btns">
+          <button class="btn bg" id="bTxClr" style="padding:2px 8px;font-size:.58rem;">✕ Clear</button>
         </div>
       </div>
-      <div id="tbox">Transcribed meeting speech will appear here…</div>
+      <div id="tbox">Transcribed speech will appear here…</div>
     </div>
 
-  </div><!-- /LP -->
+    <!-- Fills remaining left height -->
+    <div id="lspacer"></div>
+  </div>
 
-  <!-- ═══════════════ DRAG HANDLE ═══════════════ -->
-  <div id="RZ" title="↔ Drag to resize panels"></div>
+  <!-- ══════════ DRAG HANDLE ══════════ -->
+  <div id="RZ" title="↔ Drag to resize"></div>
 
-  <!-- ═══════════════ RIGHT PANEL ═══════════════ -->
+  <!-- ══════════ RIGHT PANEL ══════════ -->
   <div id="RP">
-
-    <!-- Panel header -->
     <div class="ph">
-      <div class="dot" style="background:#a78bfa;box-shadow:0 0 6px #a78bfa99;"></div>
+      <div class="dot" style="background:#a78bfa;box-shadow:0 0 5px #a78bfa80;"></div>
       AI Assistant · GPT-4o Vision
-      <button class="btn bg" onclick="clearChat()"
-        style="margin-left:auto;padding:3px 9px;font-size:0.58rem;">🗑 Clear</button>
+      <button class="btn bg" id="bClr" style="margin-left:auto;padding:3px 8px;font-size:.58rem;">🗑 Clear</button>
     </div>
 
-    <!-- Chat messages — scrolls internally, NEVER overflows panel -->
     <div id="msgs">
-      <div class="emp" id="empstate">
+      <div class="emp" id="emp">
         <div class="ei">🧠</div>
-        <p class="ep">Share your meeting tab on the left, take a screenshot, then ask anything about what's on screen.</p>
+        <p class="ep">Open the Capture Window, share your meeting tab, take a screenshot, then ask anything.</p>
       </div>
     </div>
 
-    <!-- Quick actions -->
     <div id="qbar">
-      <button class="btn bb" onclick="qa('sum')">🗒 Summarise</button>
-      <button class="btn bb" onclick="qa('act')">✅ Action Items</button>
-      <button class="btn bb" onclick="qa('rep')">💡 Draft Reply</button>
-      <button class="btn bb" onclick="qa('key')">🔑 Key Points</button>
+      <button class="btn bb" id="q-sum">🗒 Summarise</button>
+      <button class="btn bb" id="q-act">✅ Action Items</button>
+      <button class="btn bb" id="q-rep">💡 Draft Reply</button>
+      <button class="btn bb" id="q-key">🔑 Key Points</button>
     </div>
 
-    <!-- Input bar with big Send button -->
     <div id="ibar">
-      <textarea id="inp" rows="1"
-        placeholder="Ask about your meeting… (Enter to send · Shift+Enter for new line)"
-        onkeydown="onK(event)"
-        oninput="grow(this)"></textarea>
-      <button id="bsnd" onclick="doSend()">Send ↑</button>
+      <textarea id="inp" rows="1" placeholder="Type your question… (Enter = send · Shift+Enter = new line)"></textarea>
+      <button id="bsnd">Send ↑</button>
     </div>
-
-  </div><!-- /RP -->
+  </div>
 
 </div><!-- /app -->
 
 <script>
-// ═══════════════════════════════════════════════════════════════
-// CONFIG — injected from Python session
-// ═══════════════════════════════════════════════════════════════
-const APIKEY = "{api_key}";
-const MODEL  = "{AI_MODEL}";
-const SYSPMT = "You are MeetingMind AI, a concise and smart assistant embedded alongside a live video meeting. When shown a screenshot, read it carefully and describe what you see. Help the user with summaries, action items, key decisions, drafting replies, answering questions, or any other task. Be direct and practical.";
+// ═══════════════════════════════════════════════════════════
+//  CONFIG  (injected from Python)
+// ═══════════════════════════════════════════════════════════
+var APIKEY  = "{api_key}";
+var MODEL   = "{AI_MODEL}";
+var SYSPMT  = "You are MeetingMind AI, a sharp and concise assistant sitting alongside a live video meeting. When shown a screenshot, read it carefully. Help with summaries, action items, key decisions, drafting replies, answering questions about what is shown. Be direct and practical.";
+var POPUP_ENCODED = "{POPUP_HTML_ENCODED}";
+var POPUP_HTML  = decodeURIComponent(POPUP_ENCODED);
 
-// ═══════════════════════════════════════════════════════════════
-// STATE
-// ═══════════════════════════════════════════════════════════════
-var mediaStream = null;
+// ═══════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════
+var captureWin  = null;
 var recognition = null;
-var isListening = false;
+var listening   = false;
 var txBuffer    = "";
-var pendingShot = null;   // base64 jpeg string (no prefix)
-var chatHistory = [];     // {{role, content}} for API
+var pendingShot = null;   // base64 jpeg from popup
+var chatHistory = [];     // {{role, content}}
 
-// ═══════════════════════════════════════════════════════════════
-// FIX #1 — getDisplayMedia BRIDGE
-//
-// Problem: Streamlit's iframe does NOT have allow="display-capture"
-//   so calling navigator.mediaDevices.getDisplayMedia() inside the
-//   iframe throws NotAllowedError in Chrome.
-//
-// Solution: Inject a tiny bridge function into window.PARENT.
-//   Since the Streamlit iframe is same-origin (allow-same-origin is
-//   set in sandbox), we can write to window.parent.document freely.
-//   The bridge calls getDisplayMedia() in the TOP-LEVEL context
-//   where it is allowed. The returned MediaStream is a JS object
-//   that crosses same-origin frames without any restriction.
-// ═══════════════════════════════════════════════════════════════
-(function injectBridge() {{
-  try {{
-    if (window.parent === window) return; // not in iframe
-    if (window.parent._mmBridgeReady) return; // already injected
-    var s = window.parent.document.createElement('script');
-    s.textContent = [
-      "window._mmBridgeReady = true;",
-      "window._mmGetDisplay = function(opts) {{",
-      "  return navigator.mediaDevices.getDisplayMedia(opts);",
-      "}};"
-    ].join('\\n');
-    window.parent.document.head.appendChild(s);
-    console.log('[MeetingMind] capture bridge injected into parent');
-  }} catch(e) {{
-    console.warn('[MeetingMind] bridge inject failed — falling back to direct', e);
-  }}
-}})();
+// ═══════════════════════════════════════════════════════════
+//  INITIALISE — bind all events in DOMContentLoaded
+//  (This avoids any race between DOM parse and script execution)
+// ═══════════════════════════════════════════════════════════
+document.addEventListener("DOMContentLoaded", function() {{
 
-// Wrapper: use bridge if available, otherwise direct
-async function getDisplayMedia(opts) {{
-  if (window.parent && window.parent._mmGetDisplay) {{
-    return await window.parent._mmGetDisplay(opts);
-  }}
-  // Fallback (works if app is opened directly, not in iframe)
-  return await navigator.mediaDevices.getDisplayMedia(opts);
-}}
+  // ── Confirm JS is alive ──────────────────────────────────
+  setChip("✅ READY", "#0d2a1a", "#4ade80");
+  setTimeout(function(){{ setChip("⬤ IDLE", "#161a24", "#3d4f6e"); }}, 1500);
 
-// ═══════════════════════════════════════════════════════════════
-// FIX #3 — DRAG-TO-RESIZE (left panel)
-// ═══════════════════════════════════════════════════════════════
-(function setupResize() {{
-  var rz = g('RZ'), lp = g('LP'), ap = g('app');
-  var dragging = false, startX = 0, startW = 0;
+  // ── Bind buttons ────────────────────────────────────────
+  document.getElementById("bOpen").addEventListener("click",  openCapture);
+  document.getElementById("bMic").addEventListener("click",   toggleMic);
+  document.getElementById("bTxUse").addEventListener("click", useTranscript);
+  document.getElementById("bTxClr").addEventListener("click", clearTranscript);
+  document.getElementById("bsnd").addEventListener("click",   sendMsg);
+  document.getElementById("bClr").addEventListener("click",   clearChat);
+  document.getElementById("q-sum").addEventListener("click", function(){{ qa("sum"); }});
+  document.getElementById("q-act").addEventListener("click", function(){{ qa("act"); }});
+  document.getElementById("q-rep").addEventListener("click", function(){{ qa("rep"); }});
+  document.getElementById("q-key").addEventListener("click", function(){{ qa("key"); }});
 
-  rz.addEventListener('mousedown', function(e) {{
-    dragging = true;
-    startX   = e.clientX;
-    startW   = lp.offsetWidth;
-    rz.classList.add('active');
-    document.body.style.cursor     = 'col-resize';
-    document.body.style.userSelect = 'none';
-    e.preventDefault();
+  // ── Enter key in textarea ────────────────────────────────
+  document.getElementById("inp").addEventListener("keydown", function(e) {{
+    if (e.key === "Enter" && !e.shiftKey) {{ e.preventDefault(); sendMsg(); }}
   }});
 
-  document.addEventListener('mousemove', function(e) {{
-    if (!dragging) return;
-    var appW = ap.offsetWidth;
-    var newW = Math.max(240, Math.min(startW + e.clientX - startX, appW - 250));
-    lp.style.width    = newW + 'px';
-    lp.style.maxWidth = 'none';
+  // ── Auto-grow textarea ───────────────────────────────────
+  document.getElementById("inp").addEventListener("input", function() {{ growInp(); }});
+
+  // ── Drag-to-resize ───────────────────────────────────────
+  initResize();
+
+  // ── Listen for screenshots from popup ───────────────────
+  window.addEventListener("message", function(e) {{
+    if (!e.data || e.data.type !== "mm-screenshot") return;
+    pendingShot = e.data.data;
+    document.getElementById("shot-img").src = "data:image/jpeg;base64," + pendingShot;
+    document.getElementById("shot-area").style.display = "block";
+    toast("📸 Screenshot received — sends with next message", "#0e2e3b", "#67e8f9");
   }});
 
-  document.addEventListener('mouseup', function() {{
-    if (!dragging) return;
-    dragging = false;
-    rz.classList.remove('active');
-    document.body.style.cursor     = '';
-    document.body.style.userSelect = '';
-  }});
-}})();
+}});
 
-// ═══════════════════════════════════════════════════════════════
-// SCREEN CAPTURE
-// ═══════════════════════════════════════════════════════════════
-async function startCap() {{
-  try {{
-    setChip('⏳ STARTING…', '#0c1a2e', '#3b82f6');
-    mediaStream = await getDisplayMedia({{ video: {{ frameRate: 15 }}, audio: true }});
-    var vid = g('vid');
-    vid.srcObject = mediaStream;
-    vid.style.display = 'block';
-    g('vph').style.display = 'none';
-    setBtn('bsh',  true,  '✅ Sharing',    'btn bgr');
-    setBtn('bst',  false, '⏹ Stop',        'btn bg');
-    setBtn('bsc',  false, '📸 Screenshot', 'btn bb');
-    setChip('● LIVE', '#0d2a1a', '#4ade80');
-    mediaStream.getTracks().forEach(function(t) {{
-      t.addEventListener('ended', stopCap);
-    }});
-  }} catch(e) {{
-    setChip('✖ DENIED', '#2d0a0a', '#f87171');
-    setTimeout(function() {{ setChip('● IDLE', '#1c1917', '#78716c'); }}, 2500);
+// ═══════════════════════════════════════════════════════════
+//  CAPTURE WINDOW
+//  Opens a real top-level popup — getDisplayMedia() works there
+//  Sandbox allows popups (allow-popups-to-escape-sandbox)
+// ═══════════════════════════════════════════════════════════
+function openCapture() {{
+  if (captureWin && !captureWin.closed) {{
+    captureWin.focus(); return;
   }}
+  captureWin = window.open(
+    "", "mm-capture",
+    "width=1000,height=660,resizable=yes,scrollbars=no,toolbar=no,menubar=no"
+  );
+  if (!captureWin) {{
+    toast("⚠ Popup blocked — please allow popups for this site", "#2d1a00", "#fb923c");
+    return;
+  }}
+  captureWin.document.open();
+  captureWin.document.write(POPUP_HTML);
+  captureWin.document.close();
+  setChip("📺 CAPTURE OPEN", "#0c1a2e", "#7dd3fc");
+  toast("📺 Capture window opened — Share Tab there, then 📸 to send here", "#0c1a2e", "#7dd3fc");
 }}
 
-function stopCap() {{
-  if (mediaStream) {{
-    mediaStream.getTracks().forEach(function(t) {{ t.stop(); }});
-    mediaStream = null;
-  }}
-  var vid = g('vid');
-  vid.srcObject = null;
-  vid.style.display = 'none';
-  g('vph').style.display = 'flex';
-  setBtn('bsh',  false, '📺 Share Tab',  'btn bb');
-  setBtn('bst',  true,  '⏹ Stop',        'btn bg');
-  setBtn('bsc',  true,  '📸 Screenshot', 'btn bb');
-  setChip('● IDLE', '#1c1917', '#78716c');
-}}
-
-// ═══════════════════════════════════════════════════════════════
-// SCREENSHOT
-// ═══════════════════════════════════════════════════════════════
-function takeShot() {{
-  var vid = g('vid'), cv = g('cv');
-  if (!vid.srcObject || vid.videoWidth === 0) {{
-    toast('⚠ Start sharing your tab first', '#2d1a00', '#fb923c'); return;
-  }}
-  cv.width  = vid.videoWidth  || 1280;
-  cv.height = vid.videoHeight || 720;
-  cv.getContext('2d').drawImage(vid, 0, 0, cv.width, cv.height);
-  var dataUrl  = cv.toDataURL('image/jpeg', 0.85);
-  pendingShot  = dataUrl.split(',')[1];
-  g('simg').src = dataUrl;
-  g('sstrip').style.display = 'block';
-  toast('📸 Screenshot captured — will attach to your next message', '#0e2a33', '#67e8f9');
-}}
-
-// ═══════════════════════════════════════════════════════════════
-// SPEECH RECOGNITION (Chrome Web Speech API)
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+//  SPEECH RECOGNITION  (Web Speech API — Chrome)
+// ═══════════════════════════════════════════════════════════
 function toggleMic() {{
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) {{
-    g('tbox').textContent = '⚠ Speech API requires Chrome browser.'; return;
+    addError("Speech recognition requires Chrome. Please use Chrome browser.");
+    return;
   }}
-  if (isListening) {{ recognition.stop(); return; }}
+  if (listening) {{ recognition.stop(); return; }}
 
   recognition = new SR();
-  recognition.continuous     = true;
+  recognition.continuous = true;
   recognition.interimResults = true;
-  recognition.lang           = 'en-US';
+  recognition.lang = "en-US";
 
   recognition.onstart = function() {{
-    isListening = true;
-    g('bmic').textContent = '⏹ Stop';
-    g('bmic').className   = 'btn bp';
-    setChip('🎙 LISTENING', '#1e1b4b', '#a5b4fc');
+    listening = true;
+    document.getElementById("bMic").textContent = "⏹ Stop";
+    document.getElementById("bMic").className = "btn bp";
+    setChip("🎙 LISTENING", "#1e1b4b", "#a5b4fc");
   }};
 
   recognition.onresult = function(e) {{
-    var interim = '';
+    var interim = "";
     for (var i = e.resultIndex; i < e.results.length; i++) {{
       var t = e.results[i][0].transcript;
-      if (e.results[i].isFinal) {{ txBuffer += t + ' '; }}
+      if (e.results[i].isFinal) {{ txBuffer += t + " "; }}
       else {{ interim = t; }}
     }}
-    var el = g('tbox');
-    el.textContent = txBuffer + (interim ? '…' + interim : '');
-    el.classList.add('active');
+    var el = document.getElementById("tbox");
+    el.textContent = txBuffer + (interim ? "…" + interim : "");
+    el.classList.add("live");
     el.scrollTop = el.scrollHeight;
   }};
 
   recognition.onerror = function(e) {{
-    g('tbox').textContent = '⚠ Error: ' + e.error;
-    g('tbox').classList.remove('active');
+    document.getElementById("tbox").textContent = "⚠ Speech error: " + e.error;
+    document.getElementById("tbox").classList.remove("live");
   }};
 
   recognition.onend = function() {{
-    isListening = false;
-    g('bmic').textContent = '🎙 Listen';
-    g('bmic').className   = 'btn bp';
-    setChip(mediaStream ? '● LIVE' : '● IDLE',
-            mediaStream ? '#0d2a1a' : '#1c1917',
-            mediaStream ? '#4ade80' : '#78716c');
+    listening = false;
+    document.getElementById("bMic").textContent = "🎙 Listen";
+    document.getElementById("bMic").className = "btn bg";
+    setChip("⬤ IDLE", "#161a24", "#3d4f6e");
   }};
 
   recognition.start();
 }}
 
-function useTx() {{
-  var t = txBuffer.trim() || g('tbox').textContent.trim();
-  if (!t || t.startsWith('Transcribed')) return;
-  g('inp').value = t; grow(g('inp')); g('inp').focus();
+function useTranscript() {{
+  var t = txBuffer.trim();
+  if (!t) t = document.getElementById("tbox").textContent.trim();
+  if (!t || t.indexOf("Transcribed") === 0) return;
+  document.getElementById("inp").value = t;
+  growInp();
+  document.getElementById("inp").focus();
 }}
 
-function clearTx() {{
-  txBuffer = '';
-  g('tbox').textContent = 'Transcribed meeting speech will appear here…';
-  g('tbox').classList.remove('active');
+function clearTranscript() {{
+  txBuffer = "";
+  document.getElementById("tbox").textContent = "Transcribed speech will appear here…";
+  document.getElementById("tbox").classList.remove("live");
 }}
 
-// ═══════════════════════════════════════════════════════════════
-// CHAT — INPUT HELPERS
-// ═══════════════════════════════════════════════════════════════
-function onK(e) {{
-  if (e.key === 'Enter' && !e.shiftKey) {{ e.preventDefault(); doSend(); }}
-}}
-
-function grow(el) {{
-  el.style.height = 'auto';
-  el.style.height = Math.min(el.scrollHeight, 100) + 'px';
-}}
-
-// ═══════════════════════════════════════════════════════════════
-// CHAT — SEND MESSAGE  (FIX #1 — fetch to OpenAI works in browser)
-// ═══════════════════════════════════════════════════════════════
-async function doSend(overrideText) {{
-  var inp  = g('inp');
-  var text = (overrideText || inp.value).trim();
+// ═══════════════════════════════════════════════════════════
+//  SEND MESSAGE  →  OpenAI
+//
+//  Why fetch works here:
+//    OpenAI sets:  Access-Control-Allow-Origin: *
+//    This allows requests from ANY origin, including null-origin
+//    srcdoc iframes like Streamlit components.
+//    All errors are shown in the chat — nothing is hidden.
+// ═══════════════════════════════════════════════════════════
+function sendMsg(overrideText) {{
+  var inp  = document.getElementById("inp");
+  var text = typeof overrideText === "string" ? overrideText.trim() : inp.value.trim();
   if (!text) return;
 
-  inp.value = '';
-  grow(inp);
-  g('bsnd').disabled = true;
-  g('empstate') && g('empstate').remove();
+  inp.value = "";
+  growInp();
 
-  // Grab and reset screenshot
+  var bsnd = document.getElementById("bsnd");
+  bsnd.disabled = true;
+
+  // Remove empty state
+  var emp = document.getElementById("emp");
+  if (emp) emp.remove();
+
+  // Screenshot
   var hasShot = !!pendingShot;
   var shot64  = pendingShot;
   pendingShot = null;
-  g('sstrip').style.display = 'none';
+  document.getElementById("shot-area").style.display = "none";
 
-  // Render user bubble
-  addBubble('u', text, hasShot);
+  // User bubble
+  addBubble("u", text, hasShot);
 
-  // Build OpenAI content array
+  // Build content array for OpenAI
   var userContent = [];
   if (shot64) {{
     userContent.push({{
-      type: 'image_url',
-      image_url: {{ url: 'data:image/jpeg;base64,' + shot64, detail: 'high' }}
+      type: "image_url",
+      image_url: {{ url: "data:image/jpeg;base64," + shot64, detail: "high" }}
     }});
   }}
-  userContent.push({{ type: 'text', text: text }});
-  chatHistory.push({{ role: 'user', content: userContent }});
+  userContent.push({{ type: "text", text: text }});
+  chatHistory.push({{ role: "user", content: userContent }});
 
   // Typing indicator
-  var tid = 'ty' + Date.now();
+  var tid = "ty" + Date.now();
   addTyping(tid);
-  g('msgs').scrollTop = g('msgs').scrollHeight;
 
-  try {{
-    // ── ✅ CURRENT: OpenAI GPT-4o ─────────────────────────────────────────
-    var res = await fetch('https://api.openai.com/v1/chat/completions', {{
-      method : 'POST',
-      headers: {{
-        'Content-Type' : 'application/json',
-        'Authorization': 'Bearer ' + APIKEY
-      }},
-      body: JSON.stringify({{
-        model      : MODEL,
-        max_tokens : 1500,
-        messages   : [{{ role: 'system', content: SYSPMT }}].concat(chatHistory)
-      }})
-    }});
-    var data = await res.json();
-    var el = g(tid); if (el) el.remove();
+  // ── Fetch → OpenAI ──────────────────────────────────────
+  // Using var for compatibility — async/await is fine in modern browsers
+  fetch("https://api.openai.com/v1/chat/completions", {{
+    method:  "POST",
+    headers: {{
+      "Content-Type":  "application/json",
+      "Authorization": "Bearer " + APIKEY
+    }},
+    body: JSON.stringify({{
+      model:      MODEL,
+      max_tokens: 1500,
+      messages:   [{{ role: "system", content: SYSPMT }}].concat(chatHistory)
+    }})
+  }})
+  .then(function(res) {{ return res.json(); }})
+  .then(function(data) {{
+    var el = document.getElementById(tid);
+    if (el) el.remove();
 
-    if (data.error) throw new Error(data.error.message);
+    if (data.error) {{
+      addError("OpenAI error: " + data.error.message +
+               (data.error.code ? " (code: " + data.error.code + ")" : ""));
+      return;
+    }}
     var reply = data.choices[0].message.content;
-    chatHistory.push({{ role: 'assistant', content: reply }});
-    if (chatHistory.length > 24) chatHistory = chatHistory.slice(chatHistory.length - 24);
-    addBubble('a', reply);
+    chatHistory.push({{ role: "assistant", content: reply }});
+    // Keep last 20 turns to avoid token overflow
+    if (chatHistory.length > 20) {{
+      chatHistory = chatHistory.slice(chatHistory.length - 20);
+    }}
+    addBubble("a", reply);
+  }})
+  .catch(function(err) {{
+    var el = document.getElementById(tid);
+    if (el) el.remove();
+    addError("Network error: " + err.message +
+             ". Check your internet connection and API key.");
+  }})
+  .finally(function() {{
+    bsnd.disabled = false;
+  }});
 
-    // ── 🔮 FUTURE: Anthropic Claude — swap the block above for this ────────
-    // var res = await fetch('https://api.anthropic.com/v1/messages', {{
-    //   method : 'POST',
-    //   headers: {{
-    //     'Content-Type'      : 'application/json',
-    //     'x-api-key'         : APIKEY,
-    //     'anthropic-version' : '2023-06-01',
-    //     'anthropic-dangerous-direct-browser-access': 'true'
-    //   }},
-    //   body: JSON.stringify({{
-    //     model     : 'claude-opus-4-5',
-    //     max_tokens: 1500,
-    //     system    : SYSPMT,
-    //     messages  : chatHistory
-    //   }})
-    // }});
-    // var data  = await res.json();
-    // var el = g(tid); if (el) el.remove();
-    // var reply = data.content[0].text;
-    // chatHistory.push({{ role: 'assistant', content: reply }});
-    // addBubble('a', reply);
-    // ──────────────────────────────────────────────────────────────────────
-
-  }} catch(err) {{
-    var el = g(tid); if (el) el.remove();
-    addBubble('a', '⚠️ ' + err.message);
-  }}
-
-  g('bsnd').disabled = false;
+  // ── 🔮 FUTURE Claude swap: replace the fetch block above ──
+  // fetch("https://api.anthropic.com/v1/messages", {{
+  //   method: "POST",
+  //   headers: {{
+  //     "Content-Type":      "application/json",
+  //     "x-api-key":         APIKEY,
+  //     "anthropic-version": "2023-06-01",
+  //     "anthropic-dangerous-direct-browser-access": "true"
+  //   }},
+  //   body: JSON.stringify({{
+  //     model: "claude-opus-4-5", max_tokens: 1500,
+  //     system: SYSPMT, messages: chatHistory
+  //   }})
+  // }})
+  // .then(r => r.json())
+  // .then(d => {{ ... d.content[0].text ... }})
+  // ──────────────────────────────────────────────────────────
 }}
 
-// ═══════════════════════════════════════════════════════════════
-// QUICK ACTIONS
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+//  QUICK ACTIONS
+// ═══════════════════════════════════════════════════════════
 function qa(type) {{
   var prompts = {{
-    sum: 'Please summarise everything visible on my meeting screen.',
-    act: 'List all action items and decisions from this meeting so far.',
-    rep: 'Based on what is being discussed, help me draft a smart response.',
-    key: 'What are the key points and important numbers from this meeting?'
+    sum: "Please summarise everything visible on my meeting screen.",
+    act: "List all action items and decisions from this meeting.",
+    rep: "Help me draft a smart response to what is being discussed.",
+    key: "What are the key points and important figures from this meeting?"
   }};
-  if ((type === 'sum' || type === 'key') && !pendingShot) {{
-    toast('📸 Take a screenshot first so I can see the screen', '#1a1a2e', '#818cf8');
+  if ((type === "sum" || type === "key") && !pendingShot) {{
+    toast("📸 Open the Capture Window and send a screenshot first", "#1a1a2e", "#818cf8");
     return;
   }}
-  doSend(prompts[type]);
+  sendMsg(prompts[type]);
 }}
 
 function clearChat() {{
   chatHistory = [];
-  g('msgs').innerHTML = '<div class="emp" id="empstate"><div class="ei">🧠</div><p class="ep">Chat cleared. Ready for a fresh start!</p></div>';
+  document.getElementById("msgs").innerHTML =
+    '<div class="emp" id="emp"><div class="ei">🧠</div><p class="ep">Chat cleared — ready for a fresh start!</p></div>';
 }}
 
-// ═══════════════════════════════════════════════════════════════
-// DOM HELPERS
-// ═══════════════════════════════════════════════════════════════
-function g(id) {{ return document.getElementById(id); }}
+// ═══════════════════════════════════════════════════════════
+//  RESIZE
+// ═══════════════════════════════════════════════════════════
+function initResize() {{
+  var rz = document.getElementById("RZ");
+  var lp = document.getElementById("LP");
+  var ap = document.getElementById("app");
+  var dragging = false, startX = 0, startW = 0;
 
+  rz.addEventListener("mousedown", function(e) {{
+    dragging = true; startX = e.clientX; startW = lp.offsetWidth;
+    rz.classList.add("on");
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    e.preventDefault();
+  }});
+  document.addEventListener("mousemove", function(e) {{
+    if (!dragging) return;
+    var newW = Math.max(230, Math.min(startW + e.clientX - startX, ap.offsetWidth - 240));
+    lp.style.width = newW + "px";
+    lp.style.maxWidth = "none";
+  }});
+  document.addEventListener("mouseup", function() {{
+    if (!dragging) return;
+    dragging = false; rz.classList.remove("on");
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  }});
+}}
+
+// ═══════════════════════════════════════════════════════════
+//  DOM HELPERS
+// ═══════════════════════════════════════════════════════════
 function addBubble(role, text, hasShot) {{
-  var msgs = g('msgs');
-  var div  = document.createElement('div');
-  div.className = (role === 'u') ? 'mu' : 'ma';
-  var now = new Date().toLocaleTimeString([], {{ hour: '2-digit', minute: '2-digit' }});
-  var badge = (role === 'u' && hasShot) ? '<div class="sbadge">📸 Screenshot attached</div>' : '';
-  // Safely escape HTML then restore line breaks
+  var msgs = document.getElementById("msgs");
+  var div  = document.createElement("div");
+  div.className = (role === "u") ? "mu" : "ma";
+  var now = new Date().toLocaleTimeString([], {{hour:"2-digit", minute:"2-digit"}});
+  var badge = (role === "u" && hasShot)
+    ? '<div class="sbadge">📸 Screenshot attached</div>' : "";
   var safe = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>');
-  div.innerHTML = badge + safe + '<div class="mm">' + (role === 'u' ? 'You' : '🧠 GPT-4o') + ' &middot; ' + now + '</div>';
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/\n/g, "<br>");
+  div.innerHTML = badge + safe +
+    '<div class="mm">' + (role === "u" ? "You" : "🧠 GPT-4o") +
+    " &middot; " + now + "</div>";
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
 }}
 
 function addTyping(id) {{
-  var msgs = g('msgs');
-  var div  = document.createElement('div');
-  div.className = 'ma';
-  div.id        = id;
+  var msgs = document.getElementById("msgs");
+  var div  = document.createElement("div");
+  div.className = "ma"; div.id = id;
   div.innerHTML = '<div class="tw"><div class="td"></div><div class="td"></div><div class="td"></div></div>';
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
 }}
 
-function setChip(text, bg, color) {{
-  var el = g('chip');
-  el.textContent    = text;
-  el.style.background = bg;
-  el.style.color    = color;
+function addError(msg) {{
+  var msgs = document.getElementById("msgs");
+  var div  = document.createElement("div");
+  div.className = "merr";
+  div.textContent = "⚠ " + msg;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  document.getElementById("bsnd").disabled = false;
 }}
 
-function setBtn(id, disabled, text, cls) {{
-  var el = g(id);
-  el.disabled   = disabled;
-  el.textContent = text;
-  el.className  = cls;
+function setChip(text, bg, color) {{
+  var el = document.getElementById("chip");
+  el.textContent = text; el.style.background = bg; el.style.color = color;
+}}
+
+function growInp() {{
+  var el = document.getElementById("inp");
+  el.style.height = "auto";
+  el.style.height = Math.min(el.scrollHeight, 100) + "px";
 }}
 
 function toast(msg, bg, color) {{
-  var el = document.createElement('div');
-  el.className = 'tst';
-  el.textContent = msg;
-  el.style.background = bg;
-  el.style.color      = color;
-  el.style.border     = '1px solid ' + color + '55';
+  var el = document.createElement("div");
+  el.className = "tst"; el.textContent = msg;
+  el.style.background = bg; el.style.color = color;
+  el.style.border = "1px solid " + color + "44";
   document.body.appendChild(el);
-  setTimeout(function() {{ el.style.opacity = '0'; }}, 2600);
-  setTimeout(function() {{ el.remove(); }}, 3100);
+  setTimeout(function(){{ el.style.opacity = "0"; }}, 2700);
+  setTimeout(function(){{ el.remove(); }}, 3200);
 }}
 </script>
 </body>
 </html>"""
 
-# Single component render — no extra iframes, no black boxes
-st.components.v1.html(MAIN_APP, height=730, scrolling=False)
-
+st.components.v1.html(MAIN_APP, height=720, scrolling=False)
