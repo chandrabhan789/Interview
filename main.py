@@ -1,6 +1,5 @@
 import streamlit as st
 import base64
-from datetime import datetime
 from openai import OpenAI
 
 st.set_page_config(layout="wide")
@@ -20,7 +19,7 @@ st.session_state.api_key = st.text_input("OpenAI API Key", type="password")
 left, right = st.columns([1.2, 1])
 
 # ═══════════════════════════════════
-# LEFT PANEL (LIVE + TRANSCRIPT)
+# LEFT PANEL
 # ═══════════════════════════════════
 with left:
     component_value = st.components.v1.html("""
@@ -36,14 +35,15 @@ with left:
 
     <h4>🎙 Live Transcript</h4>
     <div id="transcript" 
-        style="background:#111;
-               padding:12px;
-               border-radius:8px;
-               height:80px;
-               font-size:14px;
-               line-height:1.6;
-               overflow-y:auto;
-               color:#e2e8f0;">
+        style="
+        background:#111;
+        padding:12px;
+        border-radius:8px;
+        min-height:70px;   /* ✅ FIX: 2–3 lines */
+        font-size:14px;
+        line-height:1.6;
+        overflow-y:auto;
+        color:#e2e8f0;">
     </div>
 
     </div>
@@ -78,7 +78,6 @@ with left:
         canvas.getContext("2d").drawImage(video,0,0,800,450);
 
         const data = canvas.toDataURL("image/jpeg",0.6);
-
         sendData("screenshot", data);
     }
 
@@ -106,7 +105,6 @@ with left:
             }
 
             document.getElementById("transcript").innerText = fullText + " " + interim;
-
             sendData("transcript", fullText);
         }
 
@@ -127,51 +125,14 @@ with left:
             st.session_state["auto_prompt"] = component_value["data"]
 
 # ═══════════════════════════════════
-# RIGHT PANEL (AI CHAT FIXED UI)
+# RIGHT PANEL (FIXED CHAT)
 # ═══════════════════════════════════
 with right:
 
-    # 🔥 FIX: Scrollable chat container
-    chat_html = """
-    <div style="
-        height:400px;
-        overflow-y:auto;
-        padding:10px;
-        border:1px solid #ddd;
-        border-radius:10px;
-        background:#0e1117;
-        color:white;
-        display:flex;
-        flex-direction:column;
-        gap:10px;
-    " id="chat-box">
-    """
-
+    # ✅ FIX: Proper chat UI (no HTML rendering issue)
     for m in st.session_state.messages:
-        if m["role"] == "user":
-            chat_html += f"""
-            <div style="align-self:flex-end;background:#1e3a5f;padding:8px 12px;border-radius:10px;">
-            {m['text']}
-            </div>
-            """
-        else:
-            chat_html += f"""
-            <div style="align-self:flex-start;background:#222;padding:8px 12px;border-radius:10px;">
-            {m['text']}
-            </div>
-            """
-
-    chat_html += "</div>"
-
-    # Auto-scroll
-    chat_html += """
-    <script>
-    var box = document.getElementById('chat-box');
-    if(box){ box.scrollTop = box.scrollHeight; }
-    </script>
-    """
-
-    st.markdown(chat_html, unsafe_allow_html=True)
+        with st.chat_message(m["role"]):
+            st.markdown(m["text"])
 
     user_input = st.chat_input("Ask about meeting...")
 
