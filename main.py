@@ -2,7 +2,6 @@ import streamlit as st
 import base64
 from openai import OpenAI
 
-# ── Page Config ──
 st.set_page_config(layout="wide")
 
 # ── Session State ──
@@ -13,14 +12,12 @@ if "screenshot" not in st.session_state:
 if "api_key" not in st.session_state:
     st.session_state.api_key = ""
 
-# ── Header ──
 st.title("🧠 MeetingMind AI")
 
-# ── API Key ──
 st.session_state.api_key = st.text_input("OpenAI API Key", type="password")
 
-# ── Layout ──
-left, right = st.columns([1.2, 1])
+# ✅ FIX: Increase left panel width
+left, right = st.columns([1.6, 1])
 
 # ═══════════════════════════════════
 # LEFT PANEL (VIDEO + TRANSCRIPT)
@@ -28,7 +25,7 @@ left, right = st.columns([1.2, 1])
 with left:
 
     component_value = st.components.v1.html("""
-    <div style="color:white; display:flex; flex-direction:column; gap:10px; height:100%;">
+    <div style="color:white; display:flex; flex-direction:column; gap:12px;">
 
     <!-- Buttons -->
     <div>
@@ -37,13 +34,13 @@ with left:
         <button onclick="takeShot()">📸 Screenshot</button>
     </div>
 
-    <!-- Video -->
+    <!-- VIDEO (BIG SIZE FIX) -->
     <video id="video" autoplay
         style="
         width:100%;
-        height:260px;
+        height:400px;   /* ✅ BIGGER VIDEO */
         object-fit:contain;
-        border-radius:10px;
+        border-radius:12px;
         background:black;">
     </video>
 
@@ -55,9 +52,9 @@ with left:
             background:#111;
             padding:12px;
             border-radius:8px;
-            min-height:80px;
-            max-height:120px;
-            font-size:14px;
+            min-height:90px;
+            max-height:140px;
+            font-size:15px;
             line-height:1.6;
             overflow-y:auto;
             color:#e2e8f0;">
@@ -90,12 +87,12 @@ with left:
         const video = document.getElementById("video");
         const canvas = document.createElement("canvas");
 
-        canvas.width = 800;
-        canvas.height = 450;
+        canvas.width = 960;   // slightly better quality
+        canvas.height = 540;
 
-        canvas.getContext("2d").drawImage(video,0,0,800,450);
+        canvas.getContext("2d").drawImage(video,0,0,960,540);
 
-        const data = canvas.toDataURL("image/jpeg",0.6);
+        const data = canvas.toDataURL("image/jpeg",0.7);
         sendData("screenshot", data);
     }
 
@@ -129,9 +126,9 @@ with left:
         rec.start();
     }
     </script>
-    """, height=520)
+    """, height=650)  # ✅ Increased component height
 
-    # ── SAFE DATA HANDLING ──
+    # SAFE HANDLING
     if component_value and isinstance(component_value, dict):
 
         if component_value.get("type") == "screenshot":
@@ -146,19 +143,15 @@ with left:
 # ═══════════════════════════════════
 with right:
 
-    # Chat display
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["text"])
 
-    # Input
     user_input = st.chat_input("Ask about meeting...")
 
-    # Auto transcript → chat
     if "auto_prompt" in st.session_state:
         user_input = st.session_state.pop("auto_prompt")
 
-    # AI Function
     def ask_ai(api_key, history, text, img):
         client = OpenAI(api_key=api_key)
 
@@ -177,11 +170,8 @@ with right:
             "text": text
         })
 
-        messages = [
-            {"role": "system", "content": "You are a meeting assistant."}
-        ]
+        messages = [{"role": "system", "content": "You are a meeting assistant."}]
 
-        # Consistent format
         for h in history:
             messages.append({
                 "role": h["role"],
@@ -200,7 +190,6 @@ with right:
 
         return res.choices[0].message.content
 
-    # Send message
     if user_input:
         if not st.session_state.api_key:
             st.error("⚠️ Enter API key")
@@ -223,7 +212,6 @@ with right:
                 "text": reply
             })
 
-            # Clear screenshot after use
             st.session_state.screenshot = None
 
             st.rerun()
