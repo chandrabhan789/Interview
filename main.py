@@ -1,10 +1,9 @@
 import streamlit as st
-import base64
 from openai import OpenAI
 
 st.set_page_config(layout="wide")
 
-# ── Session State ──
+# ── Session ──
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "screenshot" not in st.session_state:
@@ -16,35 +15,33 @@ st.title("🧠 MeetingMind AI")
 
 st.session_state.api_key = st.text_input("OpenAI API Key", type="password")
 
-# ✅ FIX: Increase left panel width
-left, right = st.columns([1.6, 1])
+# ✅ FIX: Better layout ratio
+left, right = st.columns([1.8, 1])
 
 # ═══════════════════════════════════
-# LEFT PANEL (VIDEO + TRANSCRIPT)
+# LEFT PANEL
 # ═══════════════════════════════════
 with left:
 
     component_value = st.components.v1.html("""
     <div style="color:white; display:flex; flex-direction:column; gap:12px;">
 
-    <!-- Buttons -->
     <div>
         <button onclick="startCapture()">📺 Share Tab</button>
         <button onclick="startSpeech()">🎙 Start Transcript</button>
         <button onclick="takeShot()">📸 Screenshot</button>
     </div>
 
-    <!-- VIDEO (BIG SIZE FIX) -->
+    <!-- ✅ BIGGER VIDEO -->
     <video id="video" autoplay
         style="
         width:100%;
-        height:400px;   /* ✅ BIGGER VIDEO */
+        height:460px;   /* 🔥 +15% increased */
         object-fit:contain;
         border-radius:12px;
         background:black;">
     </video>
 
-    <!-- Transcript -->
     <div>
         <h4 style="margin:5px 0;">🎙 Live Transcript</h4>
         <div id="transcript"
@@ -52,8 +49,8 @@ with left:
             background:#111;
             padding:12px;
             border-radius:8px;
-            min-height:90px;
-            max-height:140px;
+            min-height:100px;
+            max-height:150px;
             font-size:15px;
             line-height:1.6;
             overflow-y:auto;
@@ -87,7 +84,7 @@ with left:
         const video = document.getElementById("video");
         const canvas = document.createElement("canvas");
 
-        canvas.width = 960;   // slightly better quality
+        canvas.width = 960;
         canvas.height = 540;
 
         canvas.getContext("2d").drawImage(video,0,0,960,540);
@@ -126,9 +123,8 @@ with left:
         rec.start();
     }
     </script>
-    """, height=650)  # ✅ Increased component height
+    """, height=720)
 
-    # SAFE HANDLING
     if component_value and isinstance(component_value, dict):
 
         if component_value.get("type") == "screenshot":
@@ -139,13 +135,28 @@ with left:
             st.session_state["auto_prompt"] = component_value["data"]
 
 # ═══════════════════════════════════
-# RIGHT PANEL (AI CHAT)
+# RIGHT PANEL (FIXED CHAT)
 # ═══════════════════════════════════
 with right:
 
+    # ✅ FIX: Chat container with scroll
+    st.markdown("""
+    <div style="
+        height:500px;
+        overflow-y:auto;
+        border:1px solid #ddd;
+        border-radius:10px;
+        padding:10px;
+        background:#0e1117;">
+    """, unsafe_allow_html=True)
+
     for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["text"])
+        if msg["role"] == "user":
+            st.markdown(f"<div style='text-align:right;color:#7dd3fc'>{msg['text']}</div>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div style='text-align:left;color:#e2e8f0'>{msg['text']}</div>", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
     user_input = st.chat_input("Ask about meeting...")
 
@@ -160,15 +171,10 @@ with right:
         if img:
             content.append({
                 "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/jpeg;base64,{img}"
-                }
+                "image_url": {"url": f"data:image/jpeg;base64,{img}"}
             })
 
-        content.append({
-            "type": "text",
-            "text": text
-        })
+        content.append({"type": "text", "text": text})
 
         messages = [{"role": "system", "content": "You are a meeting assistant."}]
 
@@ -178,10 +184,7 @@ with right:
                 "content": [{"type": "text", "text": h["text"]}]
             })
 
-        messages.append({
-            "role": "user",
-            "content": content
-        })
+        messages.append({"role": "user", "content": content})
 
         res = client.chat.completions.create(
             model="gpt-4o",
@@ -194,10 +197,7 @@ with right:
         if not st.session_state.api_key:
             st.error("⚠️ Enter API key")
         else:
-            st.session_state.messages.append({
-                "role": "user",
-                "text": user_input
-            })
+            st.session_state.messages.append({"role": "user", "text": user_input})
 
             with st.spinner("🤖 Thinking..."):
                 reply = ask_ai(
@@ -207,11 +207,7 @@ with right:
                     st.session_state.screenshot
                 )
 
-            st.session_state.messages.append({
-                "role": "assistant",
-                "text": reply
-            })
-
+            st.session_state.messages.append({"role": "assistant", "text": reply})
             st.session_state.screenshot = None
 
             st.rerun()
