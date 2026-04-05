@@ -15,7 +15,7 @@ st.title("🧠 MeetingMind AI")
 
 st.session_state.api_key = st.text_input("OpenAI API Key", type="password")
 
-# ✅ FIX: Better layout ratio
+# ✅ Layout improved
 left, right = st.columns([1.8, 1])
 
 # ═══════════════════════════════════
@@ -32,29 +32,15 @@ with left:
         <button onclick="takeShot()">📸 Screenshot</button>
     </div>
 
-    <!-- ✅ BIGGER VIDEO -->
     <video id="video" autoplay
-        style="
-        width:100%;
-        height:460px;   /* 🔥 +15% increased */
-        object-fit:contain;
-        border-radius:12px;
-        background:black;">
+        style="width:100%; height:460px; object-fit:contain; border-radius:12px; background:black;">
     </video>
 
     <div>
-        <h4 style="margin:5px 0;">🎙 Live Transcript</h4>
+        <h4>🎙 Live Transcript</h4>
         <div id="transcript"
-            style="
-            background:#111;
-            padding:12px;
-            border-radius:8px;
-            min-height:100px;
-            max-height:150px;
-            font-size:15px;
-            line-height:1.6;
-            overflow-y:auto;
-            color:#e2e8f0;">
+            style="background:#111;padding:12px;border-radius:8px;
+            min-height:100px;max-height:150px;overflow-y:auto;color:#e2e8f0;">
         </div>
     </div>
 
@@ -73,10 +59,7 @@ with left:
     }
 
     async function startCapture(){
-        stream = await navigator.mediaDevices.getDisplayMedia({
-            video:true,
-            audio:true
-        });
+        stream = await navigator.mediaDevices.getDisplayMedia({video:true,audio:true});
         document.getElementById("video").srcObject = stream;
     }
 
@@ -95,11 +78,7 @@ with left:
 
     function startSpeech(){
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-        if(!SR){
-            alert("Use Chrome browser");
-            return;
-        }
+        if(!SR){ alert("Use Chrome"); return; }
 
         const rec = new SR();
         rec.continuous = true;
@@ -109,11 +88,8 @@ with left:
             let interim = "";
             for(let i=e.resultIndex;i<e.results.length;i++){
                 let txt = e.results[i][0].transcript;
-                if(e.results[i].isFinal){
-                    fullText += " " + txt;
-                } else {
-                    interim += txt;
-                }
+                if(e.results[i].isFinal){ fullText += " " + txt; }
+                else { interim += txt; }
             }
 
             document.getElementById("transcript").innerText = fullText + " " + interim;
@@ -126,7 +102,6 @@ with left:
     """, height=720)
 
     if component_value and isinstance(component_value, dict):
-
         if component_value.get("type") == "screenshot":
             st.session_state.screenshot = component_value["data"].split(",")[1]
             st.success("📸 Screenshot captured")
@@ -135,29 +110,36 @@ with left:
             st.session_state["auto_prompt"] = component_value["data"]
 
 # ═══════════════════════════════════
-# RIGHT PANEL (FIXED CHAT)
+# RIGHT PANEL (FINAL FIX)
 # ═══════════════════════════════════
 with right:
 
-    # ✅ FIX: Chat container with scroll
+    # ✅ CSS FIX: constrain chat area
     st.markdown("""
-    <div style="
-        height:500px;
-        overflow-y:auto;
-        border:1px solid #ddd;
-        border-radius:10px;
-        padding:10px;
-        background:#0e1117;">
+    <style>
+    .chat-container {
+        height: 500px;
+        overflow-y: auto;
+        border: 1px solid #2a2a2a;
+        border-radius: 10px;
+        padding: 10px;
+        background: #0e1117;
+    }
+    </style>
     """, unsafe_allow_html=True)
 
+    # ✅ Start container
+    st.markdown('<div class="chat-container">', unsafe_allow_html=True)
+
+    # ✅ Native chat (NO HTML BUG)
     for msg in st.session_state.messages:
-        if msg["role"] == "user":
-            st.markdown(f"<div style='text-align:right;color:#7dd3fc'>{msg['text']}</div>", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<div style='text-align:left;color:#e2e8f0'>{msg['text']}</div>", unsafe_allow_html=True)
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["text"])
 
-    st.markdown("</div>", unsafe_allow_html=True)
+    # ✅ Close container
+    st.markdown('</div>', unsafe_allow_html=True)
 
+    # Input stays outside container (important)
     user_input = st.chat_input("Ask about meeting...")
 
     if "auto_prompt" in st.session_state:
@@ -167,7 +149,6 @@ with right:
         client = OpenAI(api_key=api_key)
 
         content = []
-
         if img:
             content.append({
                 "type": "image_url",
@@ -209,5 +190,4 @@ with right:
 
             st.session_state.messages.append({"role": "assistant", "text": reply})
             st.session_state.screenshot = None
-
             st.rerun()
