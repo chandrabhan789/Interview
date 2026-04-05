@@ -1,11 +1,3 @@
-# ✅ FIXED VERSION (All 5 issues resolved)
-# Key fixes:
-# 1. Real-time transcription visible
-# 2. Screenshot sync via Streamlit component return value
-# 3. Chat history format fixed
-# 4. Screenshot compressed
-# 5. Loading indicator added
-
 import streamlit as st
 import base64
 from datetime import datetime
@@ -22,7 +14,7 @@ if "api_key" not in st.session_state:
     st.session_state.api_key = ""
 
 # ── Header ──
-st.title("🧠 MeetingMind AI (Fixed)")
+st.title("🧠 MeetingMind AI (Fixed Version)")
 
 # ── API Key ──
 st.session_state.api_key = st.text_input("OpenAI API Key", type="password")
@@ -31,7 +23,7 @@ st.session_state.api_key = st.text_input("OpenAI API Key", type="password")
 left, right = st.columns(2)
 
 # ═══════════════════════════════════
-# LEFT: Capture + Transcript (FIXED)
+# LEFT: Capture + Transcript
 # ═══════════════════════════════════
 with left:
     st.subheader("📺 Capture + Transcript")
@@ -68,6 +60,11 @@ with left:
 
     function startSpeech() {
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR) {
+            alert("Speech Recognition not supported. Use Chrome.");
+            return;
+        }
+
         const rec = new SR();
         rec.continuous = true;
 
@@ -78,6 +75,7 @@ with left:
             }
             fullTranscript += " " + text;
             document.getElementById("transcript").innerText = fullTranscript;
+
             sendData('transcript', fullTranscript);
         };
 
@@ -91,18 +89,22 @@ with left:
     <div id="transcript" style="margin-top:10px;color:white;"></div>
     """, height=300)
 
-    # ✅ FIX: receive data
-    if component_value:
-        if component_value["type"] == "screenshot":
-            st.session_state.screenshot_b64 = component_value["data"].split(",")[1]
-            st.success("✅ Screenshot captured & ready")
+    # ✅ FIXED SAFE HANDLING
+    if component_value and isinstance(component_value, dict):
 
-        if component_value["type"] == "transcript":
+        if component_value.get("type") == "screenshot":
+            try:
+                st.session_state.screenshot_b64 = component_value["data"].split(",")[1]
+                st.success("✅ Screenshot captured & ready")
+            except:
+                st.error("❌ Screenshot processing failed")
+
+        elif component_value.get("type") == "transcript":
             st.session_state["auto_prompt"] = component_value["data"]
             st.info("🎙 Transcript updated")
 
 # ═══════════════════════════════════
-# RIGHT: Chat (FIXED)
+# RIGHT: Chat
 # ═══════════════════════════════════
 with right:
     st.subheader("💬 AI Chat")
@@ -116,6 +118,7 @@ with right:
 
     user_input = st.chat_input("Ask something...")
 
+    # Auto transcript injection
     if "auto_prompt" in st.session_state:
         user_input = st.session_state.pop("auto_prompt")
 
@@ -123,19 +126,22 @@ with right:
         client = OpenAI(api_key=api_key)
 
         content = []
+
         if screenshot_b64:
             content.append({
                 "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{screenshot_b64}"}
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{screenshot_b64}"
+                }
             })
 
         content.append({"type": "text", "text": user_text})
 
         messages = [
-            {"role": "system", "content": "You are helpful AI."}
+            {"role": "system", "content": "You are a helpful meeting assistant."}
         ]
 
-        # ✅ FIX: consistent format
+        # ✅ FIXED FORMAT
         for h in history:
             messages.append({
                 "role": h["role"],
@@ -152,18 +158,18 @@ with right:
             )
             return res.choices[0].message.content
         except Exception as e:
-            return f"Error: {str(e)}"
+            return f"⚠️ Error: {str(e)}"
 
     if user_input:
         if not st.session_state.api_key:
-            st.error("Enter API key")
+            st.error("⚠️ Enter API key")
         else:
             st.session_state.messages.append({
                 "role": "user",
                 "text": user_input
             })
 
-            # ✅ FIX: loading indicator
+            # ✅ LOADING INDICATOR
             with st.spinner("🤖 AI is analyzing..."):
                 ai_text = get_ai_response(
                     st.session_state.api_key,
