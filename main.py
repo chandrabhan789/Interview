@@ -1,19 +1,384 @@
 import streamlit as st
-import base64
+import streamlit.components.v1 as stcomp
+import tempfile
 import os
+import base64
 from datetime import datetime
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# AI PROVIDER — currently OpenAI (GPT-4o).
-# To switch to Claude in the future:
-#   1. pip install anthropic  (remove openai from requirements.txt)
-#   2. Replace:  from openai import OpenAI  →  import anthropic
-#   3. In get_ai_response(): swap the OpenAI block for the Claude block (see comments)
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 from openai import OpenAI
 
-AI_MODEL     = "gpt-4o"           # change to "claude-opus-4-5" when switching
-ENV_KEY_NAME = "OPENAI_API_KEY"   # change to "ANTHROPIC_API_KEY" when switching
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# AI PROVIDER
+# To switch to Claude: change AI_MODEL + ENV_KEY_NAME, swap get_ai_response()
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+AI_MODEL     = "gpt-4o"
+ENV_KEY_NAME = "OPENAI_API_KEY"
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CAPTURE COMPONENT HTML
+#
+# WHY declare_component instead of st.components.v1.html?
+#   st.components.v1.html() is ONE-WAY: JS → (nothing) → Python.
+#   st.components.v1.declare_component() is TWO-WAY:
+#     Python → component → JS → stSend() → Python gets the return value.
+#   This is the ONLY official Streamlit way to get data from JS back to Python.
+#
+# HOW screenshot gets to Python:
+#   1. User clicks "📸 Screenshot → AI"
+#   2. JS draws canvas, calls stSend({type:'screenshot', data:dataUrl, ts:...})
+#   3. Streamlit receives this, triggers a rerun
+#   4. capture_widget(key="cap") returns {type:'screenshot', data:...}
+#   5. Python reads it, saves to session_state.screenshot_b64
+#   6. Next chat message automatically attaches it to the OpenAI API call
+#
+# WHY getDisplayMedia works here:
+#   declare_component with path= serves files from localhost:8501/component/...
+#   This is SAME-ORIGIN as Streamlit, so Chrome allows getDisplayMedia.
+#   (Same reason V1's st.components.v1.html worked — same sandbox flags.)
+#
+# WHY transcript was invisible before:
+#   aspect-ratio:16/9 on a wide screen made the video ~600px tall,
+#   pushing transcript below the iframe's bottom. Fixed: max-height:220px on video.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CAPTURE_HTML = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: #0d0f14; color: #e2e8f0;
+    font-family: 'Segoe UI', 'DM Sans', sans-serif;
+    height: 100%; overflow-y: auto; overflow-x: hidden;
+  }
+
+  #root { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+
+  /* Controls bar */
+  #ctrl { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
+
+  /* Status pill */
+  #pill {
+    font-size: 0.65rem; padding: 2px 9px; border-radius: 10px;
+    font-family: monospace; margin-left: auto; transition: all 0.3s;
+    background: #1c1917; color: #78716c; border: 1px solid #44403c55;
+  }
+
+  /* Video area — max-height capped so transcript always shows */
+  #vwrap {
+    position: relative; background: #060810;
+    border: 1px solid #1e2435; border-radius: 10px;
+    overflow: hidden;
+    width: 100%;
+    max-height: 220px;     /* FIXED: was aspect-ratio:16/9 which made it too tall */
+    min-height: 130px;
+  }
+  #vid {
+    width: 100%; height: 100%; max-height: 220px;
+    object-fit: contain; display: none; background: #000;
+  }
+  #vph {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px;
+    min-height: 130px;
+  }
+  .vph-icon { font-size: 2rem; opacity: 0.18; }
+  .vph-hint {
+    font-size: 0.72rem; color: #1e3a5f; text-align: center;
+    max-width: 210px; line-height: 1.75; font-family: monospace;
+  }
+
+  /* Screenshot preview */
+  #shot-wrap { display: none; }
+  .shot-lbl {
+    font-size: 0.6rem; color: #22d3ee; font-family: monospace;
+    letter-spacing: 0.8px; margin-bottom: 4px; text-transform: uppercase;
+  }
+  #shot-img {
+    width: 100%; max-height: 80px; object-fit: cover;
+    border-radius: 6px; border: 1px solid #164e63;
+  }
+
+  /* Transcript section */
+  #tx-section {
+    border-top: 1px solid #1e2435; padding-top: 10px;
+    display: flex; flex-direction: column; gap: 7px;
+  }
+  .tx-title {
+    font-size: 0.62rem; color: #334155; font-family: monospace;
+    letter-spacing: 1px; text-transform: uppercase;
+  }
+  .tx-btns { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  #tx-box {
+    background: #0f1117; border: 1px solid #1e293b; border-radius: 8px;
+    padding: 8px 10px; font-size: 0.78rem; color: #64748b;
+    min-height: 72px;      /* 3 lines */
+    max-height: 90px; overflow-y: auto;
+    font-style: italic; line-height: 1.6;
+    scrollbar-width: thin; scrollbar-color: #1e2435 transparent;
+    word-break: break-word;
+  }
+  #tx-box.live { color: #94a3b8; font-style: normal; }
+
+  /* Buttons */
+  .btn {
+    padding: 6px 11px; border-radius: 7px; border: 1px solid transparent;
+    cursor: pointer; font-size: 0.7rem; font-family: monospace;
+    transition: all 0.15s; white-space: nowrap; line-height: 1;
+  }
+  .bb { background: #1e3a5f; color: #7dd3fc; border-color: #2563eb44; }
+  .bb:hover { background: #1d4ed8; color: #fff; border-color: #3b82f6; }
+  .bb:disabled { background: #141720; color: #334155; cursor: not-allowed; }
+  .bg { background: #1c1917; color: #78716c; border-color: #44403c55; }
+  .bg:hover { background: #292524; color: #a8a29e; }
+  .bgr { background: #14532d; color: #4ade80; border-color: #16a34a44; cursor: default; }
+  .bp { background: #1e1b4b; color: #a5b4fc; border-color: #6366f144; }
+  .bp:hover { background: #312e81; color: #c7d2fe; }
+  .bc { background: #164e63; color: #67e8f9; border-color: #0891b244; }
+  .bc:hover { background: #0e7490; color: #fff; }
+
+  /* Sent flash badge */
+  #sent-badge {
+    display: none; position: fixed; bottom: 12px; right: 12px;
+    background: #164e63; color: #67e8f9; border: 1px solid #0891b2;
+    padding: 7px 13px; border-radius: 8px; font-size: 0.68rem;
+    font-family: monospace; z-index: 999;
+    animation: fadein 0.2s ease;
+  }
+  @keyframes fadein { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
+</style>
+</head>
+<body>
+<div id="root">
+
+  <!-- Controls -->
+  <div id="ctrl">
+    <button class="btn bb" id="bShare" onclick="startCapture()">📺 Share Tab</button>
+    <button class="btn bg" id="bStop"  onclick="stopCapture()" disabled>⏹ Stop</button>
+    <button class="btn bb" id="bShot"  onclick="takeShot()"    disabled>📸 Screenshot → AI</button>
+    <span id="pill">● IDLE</span>
+  </div>
+
+  <!-- Video -->
+  <div id="vwrap">
+    <video id="vid" autoplay muted playsinline></video>
+    <canvas id="cv" style="display:none"></canvas>
+    <div id="vph">
+      <div class="vph-icon">📺</div>
+      <div class="vph-hint">
+        Click <strong style="color:#3b82f6">Share Tab</strong> and select your meeting tab.<br><br>
+        <span style="color:#1e3a5f">Best on Chrome.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Screenshot preview -->
+  <div id="shot-wrap">
+    <div class="shot-lbl">📸 Screenshot captured — sends with next message</div>
+    <img id="shot-img" src="" alt="screenshot"/>
+  </div>
+
+  <!-- Transcript — always visible, 3-line min -->
+  <div id="tx-section">
+    <div class="tx-title">🎙 Live Transcript</div>
+    <div class="tx-btns">
+      <button class="btn bp" id="bMic" onclick="toggleMic()">🎙 Start Listening</button>
+      <button class="btn bc" onclick="useTranscript()">↗ Use as AI Question</button>
+      <button class="btn bg" onclick="clearTx()" style="padding:5px 8px;font-size:0.62rem;">✕</button>
+    </div>
+    <div id="tx-box">Transcribed speech will appear here…</div>
+  </div>
+
+</div>
+
+<div id="sent-badge">📸 Screenshot sent to AI!</div>
+
+<script>
+var ms = null, rec = null, recognizing = false, txFull = '';
+
+// ── Streamlit bidirectional communication ──────────────────────────────
+// This is the official protocol for declare_component components.
+// stReady() tells Streamlit the component is loaded.
+// stSend(value) sends data back to Python — Python receives it as the
+// return value of capture_widget(key="cap").
+function stReady() {
+  window.parent.postMessage({
+    isStreamlitMessage: true,
+    type: 'streamlit:componentReady',
+    apiVersion: 1
+  }, '*');
+}
+
+function stSend(val) {
+  window.parent.postMessage({
+    isStreamlitMessage: true,
+    type: 'streamlit:setComponentValue',
+    value: val,
+    dataType: 'json'
+  }, '*');
+}
+
+window.addEventListener('load', stReady);
+
+// ── Screen capture ─────────────────────────────────────────────────────
+async function startCapture() {
+  try {
+    ms = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: 15 },
+      audio: true
+    });
+    var v = document.getElementById('vid');
+    v.srcObject = ms;
+    v.style.display = 'block';
+    document.getElementById('vph').style.display = 'none';
+    setBtn('bShare', true,  '✅ Sharing',         'btn bgr');
+    setBtn('bStop',  false, '⏹ Stop',             'btn bg');
+    setBtn('bShot',  false, '📸 Screenshot → AI', 'btn bb');
+    setPill('● LIVE', '#14532d', '#4ade80');
+    ms.getTracks().forEach(function(t) {
+      t.addEventListener('ended', stopCapture);
+    });
+  } catch(e) {
+    setPill('✖ DENIED', '#450a0a', '#f87171');
+    setTimeout(function() { setPill('● IDLE', '#1c1917', '#78716c'); }, 2200);
+  }
+}
+
+function stopCapture() {
+  if (ms) { ms.getTracks().forEach(function(t) { t.stop(); }); ms = null; }
+  var v = document.getElementById('vid');
+  v.srcObject = null; v.style.display = 'none';
+  document.getElementById('vph').style.display = 'flex';
+  setBtn('bShare', false, '📺 Share Tab',       'btn bb');
+  setBtn('bStop',  true,  '⏹ Stop',             'btn bg');
+  setBtn('bShot',  true,  '📸 Screenshot → AI', 'btn bb');
+  setPill('● IDLE', '#1c1917', '#78716c');
+}
+
+// ── Screenshot → sends to Python via stSend() ──────────────────────────
+function takeShot() {
+  var v = document.getElementById('vid');
+  var cv = document.getElementById('cv');
+  if (!v.srcObject || v.videoWidth === 0) {
+    setPill('⚠ No video yet', '#2d1a00', '#fb923c');
+    setTimeout(function() { setPill('● LIVE', '#14532d', '#4ade80'); }, 1500);
+    return;
+  }
+  cv.width  = v.videoWidth;
+  cv.height = v.videoHeight;
+  cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height);
+  var dataUrl = cv.toDataURL('image/jpeg', 0.85);
+
+  // Show preview in the panel
+  document.getElementById('shot-img').src = dataUrl;
+  document.getElementById('shot-wrap').style.display = 'block';
+
+  // Flash confirmation badge
+  var badge = document.getElementById('sent-badge');
+  badge.style.display = 'block';
+  setTimeout(function() { badge.style.display = 'none'; }, 2500);
+
+  setPill('📸 SENT', '#164e63', '#67e8f9');
+  setTimeout(function() { setPill('● LIVE', '#14532d', '#4ade80'); }, 1500);
+
+  // ★ KEY: send base64 data to Python via Streamlit component protocol
+  stSend({ type: 'screenshot', data: dataUrl, ts: Date.now() });
+}
+
+// ── Audio transcription ────────────────────────────────────────────────
+function toggleMic() {
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    document.getElementById('tx-box').textContent = '⚠ Speech recognition requires Chrome.';
+    return;
+  }
+  if (recognizing) { rec.stop(); return; }
+
+  rec = new SR();
+  rec.continuous     = true;
+  rec.interimResults = true;
+  rec.lang           = 'en-US';
+
+  rec.onstart = function() {
+    recognizing = true;
+    setBtn('bMic', false, '⏹ Stop Listening', 'btn bp');
+    setPill('🎙 LISTENING', '#1e1b4b', '#a5b4fc');
+  };
+
+  rec.onresult = function(e) {
+    var interim = '';
+    for (var i = e.resultIndex; i < e.results.length; i++) {
+      var t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) { txFull += t + ' '; }
+      else { interim = t; }
+    }
+    var el = document.getElementById('tx-box');
+    el.textContent = txFull + (interim ? '…' + interim : '');
+    el.classList.add('live');
+    el.scrollTop = el.scrollHeight;
+  };
+
+  rec.onerror = function(e) {
+    document.getElementById('tx-box').textContent = '⚠ Error: ' + e.error;
+    document.getElementById('tx-box').classList.remove('live');
+  };
+
+  rec.onend = function() {
+    recognizing = false;
+    setBtn('bMic', false, '🎙 Start Listening', 'btn bp');
+    setPill(ms ? '● LIVE' : '● IDLE',
+            ms ? '#14532d' : '#1c1917',
+            ms ? '#4ade80' : '#78716c');
+  };
+
+  rec.start();
+}
+
+// Send transcript text to Python as auto_prompt
+function useTranscript() {
+  var t = txFull.trim();
+  if (!t) { t = document.getElementById('tx-box').textContent.trim(); }
+  if (!t || t.indexOf('Transcribed') === 0) return;
+  stSend({ type: 'transcript', data: t, ts: Date.now() });
+}
+
+function clearTx() {
+  txFull = '';
+  document.getElementById('tx-box').textContent = 'Transcribed speech will appear here…';
+  document.getElementById('tx-box').classList.remove('live');
+}
+
+// ── DOM helpers ────────────────────────────────────────────────────────
+function setPill(t, bg, c) {
+  var el = document.getElementById('pill');
+  el.textContent = t; el.style.background = bg; el.style.color = c;
+}
+function setBtn(id, dis, txt, cls) {
+  var el = document.getElementById(id);
+  el.disabled = dis; el.textContent = txt; el.className = cls;
+}
+</script>
+</body>
+</html>"""
+
+
+# ── Register capture component (once, cached) ──────────────────────────────
+@st.cache_resource
+def _make_capture_component():
+    """
+    Write CAPTURE_HTML to a temp dir and register it as a proper
+    Streamlit declare_component. This enables bidirectional communication:
+    Python → renders component, JS → stSend() → Python receives return value.
+    The iframe persists across Streamlit reruns (video stream stays alive).
+    """
+    d = tempfile.mkdtemp()
+    with open(os.path.join(d, 'index.html'), 'w', encoding='utf-8') as f:
+        f.write(CAPTURE_HTML)
+    return stcomp.declare_component("meeting_capture_v5", path=d)
+
+
+capture_widget = _make_capture_component()
+
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -23,7 +388,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ── Custom CSS ────────────────────────────────────────────────────────────────
+# ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
@@ -34,21 +399,21 @@ st.markdown("""
     color: #e2e8f0;
   }
 
-  /* ── Hide ALL Streamlit chrome ── */
-  #MainMenu, footer, header                 { visibility: hidden !important; }
-  [data-testid="manage-app-button"]         { display: none !important; }
-  [data-testid="stToolbar"]                 { display: none !important; }
-  [data-testid="stDecoration"]              { display: none !important; }
-  .viewerBadge_container__r5tak            { display: none !important; }
-  .stDeployButton                           { display: none !important; }
-  section[data-testid="stSidebar"]          { display: none !important; }
+  /* Hide ALL Streamlit UI chrome */
+  #MainMenu, footer, header                { visibility: hidden !important; }
+  [data-testid="manage-app-button"]        { display: none !important; }
+  [data-testid="stToolbar"]               { display: none !important; }
+  [data-testid="stDecoration"]            { display: none !important; }
+  .viewerBadge_container__r5tak          { display: none !important; }
+  .stDeployButton                         { display: none !important; }
+  section[data-testid="stSidebar"]        { display: none !important; }
 
   .block-container { padding: 1rem 1.5rem !important; max-width: 100% !important; }
 
-  /* FIX: Make iframes transparent so no black boxes appear */
+  /* Transparent iframes — no black boxes */
   iframe { background: transparent !important; border: none !important; display: block !important; }
 
-  /* ── Header ── */
+  /* ── App header ── */
   .app-header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 0.6rem 1.2rem;
@@ -58,7 +423,7 @@ st.markdown("""
   }
   .app-header h1 {
     font-family: 'Space Mono', monospace;
-    font-size: 1.3rem; color: #7dd3fc; margin: 0; letter-spacing: -0.5px;
+    font-size: 1.3rem; color: #7dd3fc; margin: 0;
   }
   .header-badge {
     background: #1e3a5f; color: #7dd3fc; font-size: 0.72rem;
@@ -66,38 +431,16 @@ st.markdown("""
     font-family: 'Space Mono', monospace; border: 1px solid #2563eb44;
   }
 
-  /* ── Panel cards ── */
-  .panel-card {
-    background: #12151e; border: 1px solid #1e2435;
-    border-radius: 14px; overflow: hidden;
-    display: flex; flex-direction: column;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-  }
-  .panel-header {
-    display: flex; align-items: center; gap: 8px;
-    padding: 0.75rem 1rem; background: #1a1d27;
-    border-bottom: 1px solid #1e2435;
-    font-size: 0.82rem; font-weight: 600;
-    letter-spacing: 0.5px; text-transform: uppercase; color: #94a3b8;
-  }
-  .panel-dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: #3b82f6; box-shadow: 0 0 6px #3b82f6;
-    animation: pulse 2s infinite;
-  }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-
-  /* ── Chat messages (FIX: fixed height + scroll) ── */
+  /* ── Chat messages: fixed height, scroll inside ── */
   .chat-messages {
-    height: 420px;          /* fixed so messages scroll INSIDE the panel */
+    height: 420px;
     overflow-y: auto;
     padding: 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    scrollbar-width: thin;
-    scrollbar-color: #1e2435 transparent;
+    display: flex; flex-direction: column; gap: 12px;
+    scrollbar-width: thin; scrollbar-color: #1e2435 transparent;
     background: #0d0f14;
+    border: 1px solid #1e2435; border-radius: 10px;
+    margin-bottom: 0.5rem;
   }
   .msg-user {
     align-self: flex-end;
@@ -127,6 +470,14 @@ st.markdown("""
   .empty-chat .icon { font-size: 2.5rem; }
   .empty-chat p { font-size: 0.83rem; text-align: center; max-width: 220px; line-height: 1.6; }
 
+  /* ── Screenshot pending badge ── */
+  .shot-pending {
+    background: #0e2e3b; border: 1px solid #0891b2;
+    color: #67e8f9; padding: 6px 12px; border-radius: 8px;
+    font-size: 0.76rem; font-family: 'Space Mono', monospace;
+    margin-bottom: 8px; display: inline-block;
+  }
+
   /* ── Streamlit widget overrides ── */
   .stTextInput > div > div > input,
   .stTextArea > div > div > textarea {
@@ -145,41 +496,41 @@ st.markdown("""
   }
   div[data-testid="stHorizontalBlock"] { gap: 1rem !important; }
 
-  /* ── Chat input sizing (FIX: give it more room, avoid Manage App overlap) ── */
-  [data-testid="stChatInput"] {
-    background: #1a1d27 !important;
-    border: 1px solid #2a2f3e !important;
-    border-radius: 10px !important;
+  /* ── Chat input: 2× bigger send button ── */
+  [data-testid="stChatInputTextArea"] { min-height: 50px !important; font-size: 0.88rem !important; }
+  [data-testid="stChatInputSubmitButton"] { width: 50px !important; height: 50px !important; }
+  [data-testid="stChatInputSubmitButton"] svg { width: 22px !important; height: 22px !important; }
+
+  /* ── Panel section header ── */
+  .section-hdr {
+    display: flex; align-items: center; gap: 8px;
+    padding: 0.5rem 0; margin-bottom: 0.5rem;
+    font-size: 0.78rem; font-weight: 600;
+    letter-spacing: 0.5px; text-transform: uppercase;
+    color: #64748b; font-family: 'Space Mono', monospace;
+    border-bottom: 1px solid #1e2435; padding-bottom: 8px;
   }
-  [data-testid="stChatInputTextArea"] {
-    font-size: 0.88rem !important;
-    min-height: 52px !important;    /* 2× taller input area */
+  .section-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    box-shadow: 0 0 5px currentColor;
+    animation: pulse 2s infinite;
   }
-  [data-testid="stChatInputSubmitButton"] {
-    width: 52px !important;         /* 2× wider send button */
-    height: 52px !important;        /* 2× taller send button */
-  }
-  [data-testid="stChatInputSubmitButton"] svg {
-    width: 24px !important; height: 24px !important;
-  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Session state ─────────────────────────────────────────────────────────────
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "screenshot_b64" not in st.session_state:
-    st.session_state.screenshot_b64 = None
-if "pending_screenshot" not in st.session_state:
-    st.session_state.pending_screenshot = False
-if "api_key" not in st.session_state:
-    st.session_state.api_key = os.environ.get(ENV_KEY_NAME, "")
+if "messages"          not in st.session_state: st.session_state.messages          = []
+if "screenshot_b64"    not in st.session_state: st.session_state.screenshot_b64    = None
+if "pending_screenshot" not in st.session_state: st.session_state.pending_screenshot = False
+if "last_result_ts"    not in st.session_state: st.session_state.last_result_ts    = 0
+if "api_key"           not in st.session_state: st.session_state.api_key           = os.environ.get(ENV_KEY_NAME, "")
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="app-header">
   <h1>🧠 MeetingMind AI</h1>
-  <span class="header-badge">GPT-4o Vision · v4.0</span>
+  <span class="header-badge">GPT-4o Vision · v5.0</span>
 </div>
 """, unsafe_allow_html=True)
 
@@ -188,275 +539,82 @@ with st.expander("⚙️ OpenAI API Key", expanded=(not st.session_state.api_key
     col_k1, col_k2 = st.columns([4, 1])
     with col_k1:
         key_input = st.text_input(
-            "OpenAI API Key",
-            value=st.session_state.api_key,
-            type="password",
-            placeholder="sk-...",
-            label_visibility="collapsed",
+            "key", value=st.session_state.api_key, type="password",
+            placeholder="sk-...", label_visibility="collapsed",
         )
     with col_k2:
         if st.button("Save Key"):
             st.session_state.api_key = key_input
             st.success("Saved!")
-    st.caption("🔑 OpenAI key (sk-...) · stored in session only, never persisted.")
+    st.caption("🔑 Stored in session only — sent directly to OpenAI, never persisted.")
 
 # ── Two-column layout ─────────────────────────────────────────────────────────
-left_col, right_col = st.columns([1.15, 0.85], gap="small")
+left_col, right_col = st.columns([1.1, 0.9], gap="small")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# LEFT PANEL — Screen Capture  (V1 CAPTURE_COMPONENT — UNCHANGED, buttons work)
+# LEFT COLUMN — Capture component (bidirectional)
 # ══════════════════════════════════════════════════════════════════════════════
 with left_col:
     st.markdown("""
-    <div class="panel-card">
-      <div class="panel-header">
-        <div class="panel-dot"></div>
-        MEETING VIEW &nbsp;·&nbsp; Browser Tab Capture
-      </div>
+    <div class="section-hdr">
+      <div class="section-dot" style="color:#3b82f6;"></div>
+      MEETING VIEW · Browser Tab Capture
     </div>
     """, unsafe_allow_html=True)
 
-    # ── This is V1's exact CAPTURE_COMPONENT — only change is transcript min-height ──
-    CAPTURE_COMPONENT = """
-    <div id="capture-root" style="padding:14px; display:flex; flex-direction:column; gap:12px; background:#0d0f14;">
+    # Render the capture component and receive its return value.
+    # result is None normally; becomes a dict when user takes screenshot or
+    # clicks "Use as AI Question" in the component.
+    result = capture_widget(key="cap", default=None)
 
-      <!-- Controls row -->
-      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-        <button id="btn-share" onclick="startCapture()"
-          style="background:#1e3a5f; color:#7dd3fc; border:1px solid #2563eb55;
-                 padding:7px 14px; border-radius:8px; cursor:pointer;
-                 font-family:'Space Mono',monospace; font-size:0.75rem;">
-          📺 Share Tab
-        </button>
-        <button id="btn-stop" onclick="stopCapture()" disabled
-          style="background:#1c1917; color:#78716c; border:1px solid #44403c55;
-                 padding:7px 14px; border-radius:8px; cursor:pointer;
-                 font-family:'Space Mono',monospace; font-size:0.75rem;">
-          ⏹ Stop
-        </button>
-        <button id="btn-shot" onclick="takeScreenshot()" disabled
-          style="background:#1a2744; color:#7dd3fc; border:1px solid #3b82f655;
-                 padding:7px 14px; border-radius:8px; cursor:pointer;
-                 font-family:'Space Mono',monospace; font-size:0.75rem;">
-          📸 Screenshot → AI
-        </button>
-        <span id="status-pill"
-          style="font-size:0.7rem; background:#1c1917; color:#78716c;
-                 border:1px solid #44403c55; padding:3px 10px;
-                 border-radius:12px; font-family:'Space Mono',monospace;">
-          ● IDLE
-        </span>
-      </div>
+    # ── Handle component return value ──────────────────────────────────────
+    if result is not None:
+        result_ts = result.get("ts", 0)
 
-      <!-- Video display -->
-      <div style="position:relative; background:#060810; border:1px solid #1e2435;
-                  border-radius:10px; overflow:hidden; aspect-ratio:16/9;">
-        <video id="meeting-video" autoplay muted playsinline
-          style="width:100%; height:100%; object-fit:contain; display:none;"></video>
-        <canvas id="hidden-canvas" style="display:none;"></canvas>
-        <div id="video-placeholder"
-          style="position:absolute; inset:0; display:flex; flex-direction:column;
-                 align-items:center; justify-content:center; gap:10px; color:#334155;">
-          <div style="font-size:2.5rem;">📺</div>
-          <div style="font-size:0.8rem; font-family:'Space Mono',monospace; text-align:center;">
-            Click "Share Tab" to capture your meeting
-          </div>
-          <div style="font-size:0.68rem; color:#1e3a5f; max-width:240px; text-align:center; line-height:1.6;">
-            Works best with Chrome.<br>Select the tab running your meeting.
-          </div>
-        </div>
-      </div>
+        # Only process each event once (by timestamp)
+        if result_ts > st.session_state.last_result_ts:
+            st.session_state.last_result_ts = result_ts
 
-      <!-- Screenshot preview -->
-      <div id="shot-preview-wrap" style="display:none;">
-        <div style="font-size:0.72rem; color:#475569; font-family:'Space Mono',monospace; margin-bottom:5px;">
-          LAST SCREENSHOT (sent to AI)
-        </div>
-        <img id="shot-preview"
-          style="width:100%; border-radius:8px; border:1px solid #1e2435; max-height:120px; object-fit:cover;"/>
-        <div id="shot-time" style="font-size:0.65rem; color:#334155; margin-top:3px;"></div>
-      </div>
+            if result.get("type") == "screenshot":
+                # Strip the data:image/jpeg;base64, prefix, keep only base64
+                data_url = result.get("data", "")
+                if "," in data_url:
+                    st.session_state.screenshot_b64    = data_url.split(",", 1)[1]
+                    st.session_state.pending_screenshot = True
 
-      <!-- Audio & Transcription (FIX #3: min-height:72px = 3 lines) -->
-      <div style="border-top:1px solid #1e2435; padding-top:10px;">
-        <div style="font-size:0.7rem; color:#475569; font-family:'Space Mono',monospace;
-                    letter-spacing:0.8px; text-transform:uppercase; margin-bottom:6px;">
-          🎙 Live Transcript
-        </div>
-        <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-          <button id="btn-audio" onclick="toggleAudio()"
-            style="background:#1e1b4b; color:#a5b4fc; border:1px solid #6366f144;
-                   padding:6px 12px; border-radius:8px; cursor:pointer;
-                   font-family:'Space Mono',monospace; font-size:0.73rem;">
-            🎙 Start Listening
-          </button>
-          <button id="btn-use-transcript" onclick="sendTranscript()"
-            style="background:#0f172a; color:#475569; border:1px solid #1e2435;
-                   padding:5px 12px; border-radius:7px; cursor:pointer;
-                   font-family:'Space Mono',monospace; font-size:0.7rem;">
-            ↗ Use as AI Question
-          </button>
-        </div>
-        <div id="transcript-display"
-          style="background:#0f1117; border:1px solid #1e293b; border-radius:8px;
-                 padding:10px 12px; font-size:0.8rem; color:#64748b;
-                 min-height:72px;
-                 max-height:100px; overflow-y:auto;
-                 font-style:italic; line-height:1.6;
-                 scrollbar-width:thin;">
-          Transcribed speech will appear here…
-        </div>
-      </div>
+            elif result.get("type") == "transcript":
+                # Use transcript text as the next chat question
+                st.session_state["auto_prompt"] = result.get("data", "")
 
-      <input type="hidden" id="screenshot-data" />
-      <input type="hidden" id="transcript-data" />
-    </div>
+    # Show "screenshot pending" indicator above the AI panel
+    if st.session_state.pending_screenshot and st.session_state.screenshot_b64:
+        st.markdown('<div class="shot-pending">📸 Screenshot attached — sends with next message</div>',
+                    unsafe_allow_html=True)
 
-    <script>
-      let mediaStream  = null;
-      let recognition  = null;
-      let recognizing  = false;
-      let fullTranscript = "";
-
-      async function startCapture() {
-        try {
-          mediaStream = await navigator.mediaDevices.getDisplayMedia({
-            video: { frameRate: 15 },
-            audio: true
-          });
-          const video = document.getElementById('meeting-video');
-          video.srcObject = mediaStream;
-          video.style.display = 'block';
-          document.getElementById('video-placeholder').style.display = 'none';
-          document.getElementById('btn-share').disabled = true;
-          document.getElementById('btn-stop').disabled  = false;
-          document.getElementById('btn-shot').disabled  = false;
-          document.getElementById('btn-share').style.background = '#14532d';
-          document.getElementById('btn-share').style.color      = '#4ade80';
-          setStatus('● LIVE', '#14532d', '#4ade80', '#16a34a44');
-          mediaStream.getTracks().forEach(t => t.addEventListener('ended', stopCapture));
-        } catch(e) {
-          setStatus('✖ DENIED', '#450a0a', '#f87171', '#dc262644');
-          setTimeout(() => setStatus('● IDLE', '#1c1917', '#78716c', '#44403c55'), 2000);
-        }
-      }
-
-      function stopCapture() {
-        if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
-        const video = document.getElementById('meeting-video');
-        video.srcObject = null;
-        video.style.display = 'none';
-        document.getElementById('video-placeholder').style.display = 'flex';
-        document.getElementById('btn-share').disabled = false;
-        document.getElementById('btn-share').style.background = '#1e3a5f';
-        document.getElementById('btn-share').style.color      = '#7dd3fc';
-        document.getElementById('btn-stop').disabled = true;
-        document.getElementById('btn-shot').disabled = true;
-        setStatus('● IDLE', '#1c1917', '#78716c', '#44403c55');
-      }
-
-      function takeScreenshot() {
-        const video  = document.getElementById('meeting-video');
-        const canvas = document.getElementById('hidden-canvas');
-        canvas.width  = video.videoWidth  || 1280;
-        canvas.height = video.videoHeight || 720;
-        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-        const dataURL = canvas.toDataURL('image/jpeg', 0.85);
-        document.getElementById('shot-preview').src = dataURL;
-        document.getElementById('shot-preview-wrap').style.display = 'block';
-        document.getElementById('shot-time').textContent =
-          'Captured at ' + new Date().toLocaleTimeString();
-        document.getElementById('screenshot-data').value = dataURL;
-        setStatus('📸 SNAP!', '#164e63', '#67e8f9', '#0891b244');
-        setTimeout(() => setStatus('● LIVE', '#14532d', '#4ade80', '#16a34a44'), 1000);
-        notifyStreamlit('screenshot', dataURL);
-      }
-
-      function toggleAudio() {
-        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-          document.getElementById('transcript-display').textContent =
-            '⚠ Speech API not supported. Use Chrome.';
-          return;
-        }
-        if (recognizing) { recognition.stop(); return; }
-        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-        recognition = new SR();
-        recognition.continuous     = true;
-        recognition.interimResults = true;
-        recognition.lang           = 'en-US';
-        recognition.onstart = () => {
-          recognizing = true;
-          document.getElementById('btn-audio').textContent = '⏹ Stop Listening';
-          document.getElementById('btn-audio').style.background = '#1e3a2f';
-          document.getElementById('btn-audio').style.color      = '#4ade80';
-          setStatus('🎙 LISTENING', '#1e1b4b', '#a5b4fc', '#6366f144');
-        };
-        recognition.onresult = (e) => {
-          let interim = "";
-          for (let i = e.resultIndex; i < e.results.length; i++) {
-            const t = e.results[i][0].transcript;
-            if (e.results[i].isFinal) { fullTranscript += t + " "; }
-            else { interim = t; }
-          }
-          const el = document.getElementById('transcript-display');
-          el.textContent = fullTranscript + (interim ? '…' + interim : '');
-          el.style.fontStyle = 'normal';
-          el.style.color = '#94a3b8';
-          el.scrollTop = el.scrollHeight;
-          document.getElementById('transcript-data').value = fullTranscript;
-        };
-        recognition.onerror = (e) => {
-          document.getElementById('transcript-display').textContent = '⚠ Error: ' + e.error;
-        };
-        recognition.onend = () => {
-          recognizing = false;
-          document.getElementById('btn-audio').textContent = '🎙 Start Listening';
-          document.getElementById('btn-audio').style.background = '#1e1b4b';
-          document.getElementById('btn-audio').style.color      = '#a5b4fc';
-          setStatus(mediaStream ? '● LIVE' : '● IDLE',
-                    mediaStream ? '#14532d' : '#1c1917',
-                    mediaStream ? '#4ade80' : '#78716c',
-                    mediaStream ? '#16a34a44' : '#44403c55');
-        };
-        recognition.start();
-      }
-
-      function sendTranscript() {
-        const t = document.getElementById('transcript-data').value.trim();
-        if (!t) return;
-        notifyStreamlit('transcript', t);
-      }
-
-      function setStatus(text, bg, color, border) {
-        const el = document.getElementById('status-pill');
-        el.textContent = text;
-        el.style.background  = bg;
-        el.style.color       = color;
-        el.style.borderColor = border;
-      }
-
-      function notifyStreamlit(type, data) {
-        window.parent.postMessage({ type: 'meetingmind_' + type, data: data }, '*');
-      }
-    </script>
-    """
-
-    st.components.v1.html(CAPTURE_COMPONENT, height=640, scrolling=False)
+    # Manual screenshot upload (fallback for non-Chrome or any issues)
+    with st.expander("📁 Or upload a screenshot manually"):
+        uploaded = st.file_uploader(
+            "Upload screenshot", type=["png", "jpg", "jpeg"],
+            label_visibility="collapsed"
+        )
+        if uploaded:
+            img_bytes = uploaded.read()
+            st.session_state.screenshot_b64    = base64.b64encode(img_bytes).decode("utf-8")
+            st.session_state.pending_screenshot = True
+            st.success("Screenshot loaded — will send with next message.")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# RIGHT PANEL — AI Chat
+# RIGHT COLUMN — AI Chat
 # ══════════════════════════════════════════════════════════════════════════════
 with right_col:
     st.markdown("""
-    <div class="panel-card">
-      <div class="panel-header">
-        <div class="panel-dot" style="background:#a78bfa; box-shadow:0 0 6px #a78bfa;"></div>
-        AI ASSISTANT &nbsp;·&nbsp; GPT-4o Vision
-      </div>
+    <div class="section-hdr">
+      <div class="section-dot" style="color:#a78bfa;"></div>
+      AI ASSISTANT · GPT-4o Vision
     </div>
     """, unsafe_allow_html=True)
 
-    # ── FIX #4: Render ALL messages as ONE html block so they stay inside panel ──
+    # ── Render ALL messages as ONE html block (keeps them in fixed-height box) ──
     msgs_html = '<div class="chat-messages" id="chat-scroll">'
     if not st.session_state.messages:
         msgs_html += """
@@ -470,109 +628,59 @@ with right_col:
                 badge = ""
                 if msg.get("has_screenshot"):
                     badge = '<div class="msg-screenshot-tag">📸 Screenshot attached</div>'
-                safe_text = msg["text"].replace("<", "&lt;").replace(">", "&gt;")
-                msgs_html += f"""
-                <div class="msg-user">
-                  {badge}{safe_text}
-                  <div class="msg-meta">{msg["time"]}</div>
-                </div>"""
+                safe = msg["text"].replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+                msgs_html += f'<div class="msg-user">{badge}{safe}<div class="msg-meta">{msg["time"]}</div></div>'
             else:
-                safe_text = msg["text"].replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
-                msgs_html += f"""
-                <div class="msg-ai">
-                  {safe_text}
-                  <div class="msg-meta">🧠 MeetingMind AI · {msg["time"]}</div>
-                </div>"""
+                safe = (msg["text"]
+                        .replace("&","&amp;")
+                        .replace("<","&lt;")
+                        .replace(">","&gt;")
+                        .replace("\n","<br>"))
+                msgs_html += f'<div class="msg-ai">{safe}<div class="msg-meta">🧠 MeetingMind AI · {msg["time"]}</div></div>'
     msgs_html += "</div>"
-
-    # Auto-scroll to bottom after new message
-    msgs_html += """
-    <script>
-      (function() {
-        var el = document.getElementById('chat-scroll');
-        if (el) el.scrollTop = el.scrollHeight;
-      })();
-    </script>
-    """
-
+    # Auto-scroll to bottom
+    msgs_html += "<script>(function(){var e=document.getElementById('chat-scroll');if(e)e.scrollTop=e.scrollHeight;})();</script>"
     st.markdown(msgs_html, unsafe_allow_html=True)
 
-    # ── Screenshot listener (height=0, transparent) ────────────────────────
-    LISTENER_JS = """
-    <script>
-    window.addEventListener('message', function(e) {
-      const d = e.data;
-      if (!d || typeof d !== 'object') return;
-      if (d.type === 'meetingmind_screenshot') {
-        sessionStorage.setItem('mm_screenshot', d.data);
-        sessionStorage.setItem('mm_has_screenshot', 'true');
-        const n = document.createElement('div');
-        n.textContent = '📸 Screenshot ready — send next message to attach it';
-        n.style.cssText = 'position:fixed;bottom:80px;right:24px;background:#164e63;color:#67e8f9;padding:8px 16px;border-radius:8px;font-size:0.76rem;z-index:9999;font-family:monospace;border:1px solid #0891b2;';
-        document.body.appendChild(n);
-        setTimeout(() => n.remove(), 3000);
-      }
-      if (d.type === 'meetingmind_transcript') {
-        sessionStorage.setItem('mm_transcript', d.data);
-        const n = document.createElement('div');
-        n.textContent = '🎙 Transcript ready — paste into chat below';
-        n.style.cssText = 'position:fixed;bottom:80px;right:24px;background:#1e1b4b;color:#a5b4fc;padding:8px 16px;border-radius:8px;font-size:0.76rem;z-index:9999;font-family:monospace;border:1px solid #6366f1;';
-        document.body.appendChild(n);
-        setTimeout(() => n.remove(), 3000);
-      }
-    });
-    </script>
-    """
-    st.components.v1.html(LISTENER_JS, height=0)
-
     # ── Quick action buttons ───────────────────────────────────────────────
-    st.markdown("---")
     qa1, qa2, qa3 = st.columns(3)
     with qa1:
         if st.button("📸 Attach screenshot", key="qa_shot"):
-            st.session_state.pending_screenshot = True
-            st.info("Next message will include the last screenshot.", icon="📸")
+            if st.session_state.screenshot_b64:
+                st.session_state.pending_screenshot = True
+                st.success("Screenshot will attach to next message.")
+            else:
+                st.warning("Take a screenshot first (left panel).")
     with qa2:
         if st.button("🗒 Summarise screen", key="qa_sum"):
-            st.session_state.pending_screenshot = True
-            st.session_state["auto_prompt"] = "Please summarise what you see on my meeting screen."
+            if st.session_state.screenshot_b64:
+                st.session_state.pending_screenshot = True
+                st.session_state["auto_prompt"] = "Please summarise everything you can see on my meeting screen."
+            else:
+                st.warning("Take a screenshot first (left panel).")
     with qa3:
         if st.button("🗑 Clear chat", key="qa_clear"):
             st.session_state.messages = []
             st.rerun()
 
-    # ── Manual screenshot upload ───────────────────────────────────────────
-    with st.expander("📁 Upload screenshot manually"):
-        uploaded = st.file_uploader(
-            "Upload screenshot", type=["png", "jpg", "jpeg"],
-            label_visibility="collapsed"
-        )
-        if uploaded:
-            img_bytes = uploaded.read()
-            st.session_state.screenshot_b64 = base64.b64encode(img_bytes).decode("utf-8")
-            st.session_state.pending_screenshot = True
-            st.success("Screenshot loaded — will send with next message.")
-
-    # ── Chat input (native Streamlit — works reliably) ─────────────────────
+    # ── Chat input ─────────────────────────────────────────────────────────
     auto_val   = st.session_state.pop("auto_prompt", "")
     user_input = st.chat_input(placeholder="Ask about your meeting… (Enter to send)")
     if auto_val and not user_input:
         user_input = auto_val
 
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # get_ai_response() — swap provider here when moving to Claude
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ── AI response function ───────────────────────────────────────────────
     def get_ai_response(api_key, history, user_text, screenshot_b64):
         SYSTEM = (
-            "You are MeetingMind AI — an intelligent assistant embedded alongside "
-            "the user's live video meeting. Be concise, direct, and helpful. "
-            "When given a screenshot, describe the key information you can see. "
-            "Help with meeting summaries, action items, drafting replies, or any task."
+            "You are MeetingMind AI — a smart assistant embedded alongside a live "
+            "video meeting. When given a screenshot, read it carefully and describe "
+            "the key information. Help with summaries, action items, answering "
+            "questions about the meeting, drafting replies, or any other task. "
+            "Be concise and direct."
         )
-
         # ── ✅ CURRENT: OpenAI GPT-4o ─────────────────────────────────────
-        client = OpenAI(api_key=api_key)
-        content = []
+        client   = OpenAI(api_key=api_key)
+        content  = []
         if screenshot_b64:
             content.append({
                 "type": "image_url",
@@ -582,33 +690,32 @@ with right_col:
                 },
             })
         content.append({"type": "text", "text": user_text})
-        messages = [{"role": "system", "content": SYSTEM}]
-        messages += history
+        messages = [{"role": "system", "content": SYSTEM}] + history
         messages.append({"role": "user", "content": content})
         response = client.chat.completions.create(
             model=AI_MODEL, messages=messages, max_tokens=1500
         )
         return response.choices[0].message.content
 
-        # ── 🔮 FUTURE: Claude (uncomment, remove OpenAI block above) ──────
+        # ── 🔮 FUTURE: Claude — replace block above with this ─────────────
         # import anthropic
         # client = anthropic.Anthropic(api_key=api_key)
         # content = []
         # if screenshot_b64:
         #     content.append({"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":screenshot_b64}})
-        # content.append({"type": "text", "text": user_text})
+        # content.append({"type":"text","text":user_text})
         # response = client.messages.create(
         #     model="claude-opus-4-5", max_tokens=1500, system=SYSTEM,
-        #     messages=history + [{"role": "user", "content": content}]
+        #     messages=history + [{"role":"user","content":content}]
         # )
         # return response.content[0].text
 
-    # ── Send ──────────────────────────────────────────────────────────────
+    # ── Send message ───────────────────────────────────────────────────────
     if user_input:
         if not st.session_state.api_key:
             st.error("⚠️ Please enter your OpenAI API Key above.")
         else:
-            now     = datetime.now().strftime("%H:%M")
+            now      = datetime.now().strftime("%H:%M")
             has_shot = st.session_state.pending_screenshot and st.session_state.screenshot_b64
 
             st.session_state.messages.append({
