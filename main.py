@@ -15,7 +15,7 @@ st.title("🧠 MeetingMind AI")
 
 st.session_state.api_key = st.text_input("OpenAI API Key", type="password")
 
-# ✅ Layout improved
+# ✅ Layout
 left, right = st.columns([1.8, 1])
 
 # ═══════════════════════════════════
@@ -114,10 +114,13 @@ with left:
 # ═══════════════════════════════════
 with right:
 
-    # ✅ CSS FIX: constrain chat area
+    # ✅ Create container FIRST
+    chat_container = st.container()
+
+    # ✅ Apply CSS to THIS container only
     st.markdown("""
     <style>
-    .chat-container {
+    div[data-testid="stVerticalBlock"] > div:has(div.chat-area) {
         height: 500px;
         overflow-y: auto;
         border: 1px solid #2a2a2a;
@@ -128,18 +131,17 @@ with right:
     </style>
     """, unsafe_allow_html=True)
 
-    # ✅ Start container
-    st.markdown('<div class="chat-container">', unsafe_allow_html=True)
+    # ✅ Chat render inside container
+    with chat_container:
+        st.markdown('<div class="chat-area">', unsafe_allow_html=True)
 
-    # ✅ Native chat (NO HTML BUG)
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["text"])
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["text"])
 
-    # ✅ Close container
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    # Input stays outside container (important)
+    # ✅ Input stays outside
     user_input = st.chat_input("Ask about meeting...")
 
     if "auto_prompt" in st.session_state:
