@@ -1,0 +1,7 @@
+streamlit>=1.32.0
+openai>=1.30.0
+Pillow>=10.0.0
+
+# ── Future: switch to Claude ──────────────────────────
+# Uncomment below and remove openai when you get Anthropic API access:
+# anthropic>=0.25.0
